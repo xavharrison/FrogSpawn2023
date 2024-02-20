@@ -1,0 +1,3248 @@
+---
+title: "Frog Phenology 2023 - Data Preparation"
+author: "Kat Oliver Xav Harrison"
+date: "2023-07-13"
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+    theme: united
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+```
+
+# Inputting and formatting data
+
+## ECN survival, phenology, and chemical pollutants data
+
+```{r inputting and formatting pond data}
+library(tidyverse)
+
+#Reading in ECN data
+  pond<-read.csv('original ecn frog data no blanks.csv',header=T)
+  
+#Calculating number of observations per ECN location
+  table(pond$SITECODE)
+  
+#Displaying the field names  
+  table(pond$FIELDNAME)
+
+#Calculating number of observations per ECN location and pond   
+  with(pond,table(SITECODE,LCODE))
+  
+#Making a unique SITE_LOCATION variable
+  pond<-mutate(pond,site_location=paste(SITECODE,LCODE,sep="_"))
+    head(pond)
+    
+#Identifying duplicates  
+  pond  %>%
+      dplyr::group_by(site_location, SDATE, FIELDNAME) %>%
+      dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
+      dplyr::filter(n > 1L) 
+  
+#Removing the 8 duplicated variables    
+    pond_dedup<-pond[-which(with(pond,duplicated(paste(SITECODE,LCODE,SDATE,FIELDNAME)))),]
+      nrow(pond); nrow(pond_dedup)
+      
+#Pivoting the data frame to a wide format
+  pond_wide<- pond_dedup %>% pivot_wider(.,id_cols=c(SITECODE,LCODE,SDATE),names_from = c(FIELDNAME),values_from = VALUE)
+
+  
+#Transforming date variables into a numerical format
+  pond_date<-as.POSIXlt(strptime(pond_wide$SDATE,format="%d-%b-%y"))
+  pond_wide$survey_yearday<-as.numeric(pond_date$yday)
+  pond_wide$survey_year<-as.numeric(format(pond_date, format="%Y"))
+  
+  spawndate<-as.POSIXlt(strptime(pond_wide$SPAWNDATE,format="%d-%b-%y"))
+  pond_wide$spawn_yearday<-as.numeric(spawndate$yday)
+  pond_wide$spawn_year<-as.numeric(format(spawndate, format="%Y"))
+  
+  hatchdate<-as.POSIXlt(strptime(pond_wide$HATCHDATE,format="%d-%b-%y"))
+  pond_wide$hatch_yearday<-as.numeric(hatchdate$yday)
+  pond_wide$hatch_year<-as.numeric(format(hatchdate, format="%Y"))
+  
+  congdate<-as.POSIXlt(strptime(pond_wide$CONGDATE,format="%d-%b-%y"))
+  pond_wide$cong_yearday<-as.numeric(congdate$yday)
+  pond_wide$cong_year<-as.numeric(format(congdate, format="%Y"))
+  
+  leavedate<-as.POSIXlt(strptime(pond_wide$LEAVEDATE,format="%d-%b-%y"))
+  pond_wide$leave_yearday<-as.numeric(leavedate$yday)
+  pond_wide$leave_year<-as.numeric(format(leavedate, format="%Y"))
+```
+
+## UKCEH land cover data
+
+```{r inputting land cover data}
+#Reading in land cover data for the 2.5km surrounding each ECN location in 1990 and 2015
+  t011990 <- read.csv('t01 2.5km land cover band1.csv', header=T)
+  t012015 <- read.csv('t01 2.5km land cover band2.csv', header=T)
+  t021990 <- read.csv('t02 2.5km land cover band1.csv', header=T)
+  t022015 <- read.csv('t02 2.5km land cover band2.csv', header=T)
+  t031990 <- read.csv('t03 2.5km land cover band1.csv', header=T)
+  t032015 <- read.csv('t03 2.5km land cover band2.csv', header=T)
+  t041990 <- read.csv('t04 2.5km land cover band1.csv', header=T)
+  t042015 <- read.csv('t04 2.5km land cover band2.csv', header=T)
+  t051990 <- read.csv('t05 2.5km land cover band1.csv', header=T)
+  t052015 <- read.csv('t05 2.5km land cover band2.csv', header=T)
+  t061990 <- read.csv('t06 2.5km land cover band1.csv', header=T)
+  t062015 <- read.csv('t06 2.5km land cover band2.csv', header=T)
+  t081990 <- read.csv('t08 2.5km land cover band1.csv', header=T)
+  t082015 <- read.csv('t08 2.5km land cover band2.csv', header=T)
+  t091990 <- read.csv('t09 2.5km land cover band1.csv', header=T)
+  t092015 <- read.csv('t09 2.5km land cover band2.csv', header=T)
+  t101990 <- read.csv('t10 2.5km land cover band1.csv', header=T)
+  t102015 <- read.csv('t10 2.5km land cover band2.csv', header=T)
+  t111990 <- read.csv('t11 2.5km land cover band1.csv', header=T)
+  t112015 <- read.csv('t11 2.5km land cover band2.csv', header=T)
+```
+
+### Land cover surrounding T01
+
+```{r estimating extent of land use change per year for t01}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t01 changes by per year between 1990 and 2015
+  t01_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t01_rate) <- c('habitattype', 'rate')
+
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other  
+  t01_rate$habitattype <- c(1,2,3,4,5,6)
+  
+#Estimating the average area each habitat type surrounding t01 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t01_rate[k,2] <- (sum(t012015$area[t012015$DN == k]) - sum(t011990$area[t011990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t01}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t01
+  land_cover01 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover01) <- c('location', 'year', 'habitattype', 'area')
+
+#Adding the area of each land cover type surrounding t01 in 1990
+  for(k in 1:6) {
+    
+    land_cover01[k, 1] <- 'T01'
+    land_cover01[k, 2] <- '1990'
+    land_cover01[k,3] <- k
+    land_cover01[k,4] <- sum(t011990$area[t011990$DN == k])
+    
+  }
+
+#Estimating the area of each land cover type surrounding t01 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover01[k+(6*l), 1] <- 'T01'
+      land_cover01[k+(6*l), 2] <- as.numeric(land_cover01[k,2])+l
+      land_cover01[k+(6*l),3] <- k
+      land_cover01[k+(6*l),4] <- sum(t011990$area[t011990$DN == k]) + (t01_rate[k,2]*l)
+    
+    }
+  
+  }
+  
+  land_cover01
+```
+
+### Land cover surrounding T02
+
+```{r estimating extent of land use change per year for t02}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t02 changes by per year between 1990 and 2015
+  t02_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t02_rate) <- c('habitattype', 'rate')
+
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other 
+  t02_rate$habitattype <- c(1,2,3,4,5,6)
+
+#Estimating the average area each habitat type surrounding t02 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t02_rate[k,2] <- (sum(t022015$area[t022015$DN == k]) - sum(t021990$area[t021990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t02}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t02
+  land_cover02 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover02) <- c('location', 'year', 'habitattype', 'area')
+  
+#Adding the area of each land cover type surrounding t02 in 1990 
+  for(k in 1:6) {
+    
+    land_cover02[k, 1] <- 'T02'
+    land_cover02[k, 2] <- '1990'
+    land_cover02[k,3] <- k
+    land_cover02[k,4] <- sum(t021990$area[t021990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t02 from 1991 to 2015  
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover02[k+(6*l), 1] <- 'T02'
+      land_cover02[k+(6*l), 2] <- as.numeric(land_cover02[k,2])+l
+      land_cover02[k+(6*l),3] <- k
+      land_cover02[k+(6*l),4] <- sum(t021990$area[t021990$DN == k]) + (t02_rate[k,2]*l)
+    
+    }
+  
+  }
+  
+  land_cover02
+```
+
+### Land cover surrounding T03
+
+```{r estimating extent of land use change per year for t03}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t03 changes by per year between 1990 and 2015
+  t03_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t03_rate) <- c('habitattype', 'rate')
+
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other 
+  t03_rate$habitattype <- c(1,2,3,4,5,6)
+  
+#Estimating the average area each habitat type surrounding t03 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t03_rate[k,2] <- (sum(t032015$area[t032015$DN == k]) - sum(t031990$area[t031990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t03}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t03
+  land_cover03 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover03) <- c('location', 'year', 'habitattype', 'area')
+
+#Adding the area of each land cover type surrounding t03 in 1990
+  for(k in 1:6) {
+    
+    land_cover03[k, 1] <- 'T03'
+    land_cover03[k, 2] <- '1990'
+    land_cover03[k,3] <- k
+    land_cover03[k,4] <- sum(t031990$area[t031990$DN == k])
+    
+  }
+
+#Estimating the area of each land cover type surrounding t03 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover03[k+(6*l), 1] <- 'T03'
+      land_cover03[k+(6*l), 2] <- as.numeric(land_cover03[k,2])+l
+      land_cover03[k+(6*l),3] <- k
+      land_cover03[k+(6*l),4] <- sum(t031990$area[t031990$DN == k]) + (t03_rate[k,2]*l)
+    
+    }
+  
+  }
+
+  land_cover03
+```
+
+### Land cover surrounding T04
+
+```{r estimating extent of land use change per year for t04}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t04 changes by per year between 1990 and 2015
+  t04_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t04_rate) <- c('habitattype', 'rate')
+
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other  
+  t04_rate$habitattype <- c(1,2,3,4,5,6)
+
+#Estimating the average area each habitat type surrounding t04 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t04_rate[k,2] <- (sum(t042015$area[t042015$DN == k]) - sum(t041990$area[t041990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t04}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t04
+  land_cover04 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover04) <- c('location', 'year', 'habitattype', 'area')
+
+#Adding the area of each land cover type surrounding t04 in 1990
+  for(k in 1:6) {
+    
+    land_cover04[k, 1] <- 'T04'
+    land_cover04[k, 2] <- '1990'
+    land_cover04[k,3] <- k
+    land_cover04[k,4] <- sum(t041990$area[t041990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t04 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover04[k+(6*l), 1] <- 'T04'
+      land_cover04[k+(6*l), 2] <- as.numeric(land_cover04[k,2])+l
+      land_cover04[k+(6*l),3] <- k
+      land_cover04[k+(6*l),4] <- sum(t041990$area[t041990$DN == k]) + (t04_rate[k,2]*l)
+    
+    }
+  
+  }
+  land_cover04
+```
+
+### Land cover surrounding T05
+
+```{r estimating extent of land use change per year for t05}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t05 changes by per year between 1990 and 2015
+  t05_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t05_rate) <- c('habitattype', 'rate')
+
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other 
+  t05_rate$habitattype <- c(1,2,3,4,5,6)
+
+#Estimating the average area each habitat type surrounding t05 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t05_rate[k,2] <- (sum(t052015$area[t052015$DN == k]) - sum(t051990$area[t051990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t05}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t05
+  land_cover05 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover05) <- c('location', 'year', 'habitattype', 'area')
+ 
+#Adding the area of each land cover type surrounding t05 in 1990 
+  for(k in 1:6) {
+    
+    land_cover05[k, 1] <- 'T05'
+    land_cover05[k, 2] <- '1990'
+    land_cover05[k,3] <- k
+    land_cover05[k,4] <- sum(t051990$area[t051990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t05 from 1991 to 2015  
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover05[k+(6*l), 1] <- 'T05'
+      land_cover05[k+(6*l), 2] <- as.numeric(land_cover05[k,2])+l
+      land_cover05[k+(6*l),3] <- k
+      land_cover05[k+(6*l),4] <- sum(t051990$area[t051990$DN == k]) + (t05_rate[k,2]*l)
+    
+    }
+  
+  }
+  land_cover05
+```
+
+### Land cover surrounding T06
+
+```{r estimating extent of land use change per year for t06}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t06 changes by per year between 1990 and 2015
+  t06_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t06_rate) <- c('habitattype', 'rate')
+
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other   
+  t06_rate$habitattype <- c(1,2,3,4,5,6)
+  
+#Estimating the average area each habitat type surrounding t06 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t06_rate[k,2] <- (sum(t012015$area[t062015$DN == k]) - sum(t061990$area[t061990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t06}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t06
+  land_cover06 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover06) <- c('location', 'year', 'habitattype', 'area')
+  
+#Adding the area of each land cover type surrounding t06 in 1990 
+  for(k in 1:6) {
+    
+    land_cover06[k, 1] <- 'T06'
+    land_cover06[k, 2] <- '1990'
+    land_cover06[k,3] <- k
+    land_cover06[k,4] <- sum(t061990$area[t061990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t06 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover06[k+(6*l), 1] <- 'T06'
+      land_cover06[k+(6*l), 2] <- as.numeric(land_cover06[k,2])+l
+      land_cover06[k+(6*l),3] <- k
+      land_cover06[k+(6*l),4] <- sum(t061990$area[t061990$DN == k]) + (t06_rate[k,2]*l)
+    
+    }
+  
+  }
+  land_cover06
+```
+
+### Land cover surrounding T08
+
+```{r estimating extent of land use change per year for t08}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t08 changes by per year between 1990 and 2015
+  t08_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t08_rate) <- c('habitattype', 'rate')
+
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other
+  t08_rate$habitattype <- c(1,2,3,4,5,6)
+  
+#Estimating the average area each habitat type surrounding t08 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t08_rate[k,2] <- (sum(t082015$area[t082015$DN == k]) - sum(t081990$area[t081990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t08}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t08
+  land_cover08 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover08) <- c('location', 'year', 'habitattype', 'area')
+  
+#Adding the area of each land cover type surrounding t08 in 1990
+  for(k in 1:6) {
+    
+    land_cover08[k, 1] <- 'T08'
+    land_cover08[k, 2] <- '1990'
+    land_cover08[k,3] <- k
+    land_cover08[k,4] <- sum(t081990$area[t081990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t08 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover08[k+(6*l), 1] <- 'T08'
+      land_cover08[k+(6*l), 2] <- as.numeric(land_cover08[k,2])+l
+      land_cover08[k+(6*l),3] <- k
+      land_cover08[k+(6*l),4] <- sum(t081990$area[t081990$DN == k]) + (t08_rate[k,2]*l)
+    
+    }
+  
+  }
+  land_cover08
+```
+
+### Land cover surrounding T09
+
+```{r estimating extent of land use change per year for t09}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t09 changes by per year between 1990 and 2015
+  t09_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t09_rate) <- c('habitattype', 'rate')
+  
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other
+  t09_rate$habitattype <- c(1,2,3,4,5,6)
+  
+#Estimating the average area each habitat type surrounding t09 changes by per year between 1990 and 2015
+  for (k in 1:6)
+    {
+    t09_rate[k,2] <- (sum(t092015$area[t092015$DN == k]) - sum(t091990$area[t091990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t09}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t09
+  land_cover09 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover09) <- c('location', 'year', 'habitattype', 'area')
+  
+#Adding the area of each land cover type surrounding t09 in 1990
+  for(k in 1:6) {
+    
+    land_cover09[k, 1] <- 'T09'
+    land_cover09[k, 2] <- '1990'
+    land_cover09[k,3] <- k
+    land_cover09[k,4] <- sum(t091990$area[t091990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t09 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover09[k+(6*l), 1] <- 'T09'
+      land_cover09[k+(6*l), 2] <- as.numeric(land_cover09[k,2])+l
+      land_cover09[k+(6*l),3] <- k
+      land_cover09[k+(6*l),4] <- sum(t091990$area[t091990$DN == k]) + (t09_rate[k,2]*l)
+    
+    }
+  
+  }
+  land_cover09
+```
+
+### Land cover surrounding T10
+
+```{r estimating extent of land use change per year for t10}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t10 changes by per year between 1990 and 2015
+  t10_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t10_rate) <- c('habitattype', 'rate')
+  
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other
+  t10_rate$habitattype <- c(1,2,3,4,5,6)
+
+#Estimating the average area each habitat type surrounding t10 changes by per year between 1990 and 2015  
+  for (k in 1:6)
+    {
+    t10_rate[k,2] <- (sum(t102015$area[t102015$DN == k]) - sum(t101990$area[t101990$DN == k]))/25
+  }
+```
+
+```{r creating land cover change table for t10}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t10
+  land_cover10 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover10) <- c('location', 'year', 'habitattype', 'area')
+
+#Adding the area of each land cover type surrounding t10 in 1990
+  for(k in 1:6) {
+    
+    land_cover10[k, 1] <- 'T10'
+    land_cover10[k, 2] <- '1990'
+    land_cover10[k,3] <- k
+    land_cover10[k,4] <- sum(t101990$area[t101990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t10 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover10[k+(6*l), 1] <- 'T10'
+      land_cover10[k+(6*l), 2] <- as.numeric(land_cover10[k,2])+l
+      land_cover10[k+(6*l),3] <- k
+      land_cover10[k+(6*l),4] <- sum(t101990$area[t101990$DN == k]) + (t10_rate[k,2]*l)
+    
+    }
+  
+  }
+  land_cover10
+```
+
+### Land cover surrounding T11
+
+```{r estimating extent of land use change per year for t11}
+#Creating an empty data frame with columns for land cover type and the average area each habitat type surrounding t11 changes by per year between 1990 and 2015
+  t11_rate<-data.frame(matrix(ncol=2, nrow=6))
+  colnames(t11_rate) <- c('habitattype', 'rate')
+  
+#Adding a land cover type to each row: 1=woodland, 2=arable, 3=grassland, 4=freshwater, 5=built-up areas, 6=other
+  t11_rate$habitattype <- c(1,2,3,4,5,6)
+  
+#Estimating the average area each habitat type surrounding t11 changes by per year between 1990 and 2015 
+  for (k in 1:6)
+    {
+    t11_rate[k,2] <- (sum(t112015$area[t112015$DN == k]) - sum(t111990$area[t111990$DN == k]))/25
+  }
+
+```
+
+```{r creating land cover change table for t11}
+#Creating an empty data frame with columns for the ECN location, year, habitat type, and the estimated area of each land cover type surrounding t11
+  land_cover11 <- data.frame(matrix(ncol=4, nrow=0))
+  colnames(land_cover11) <- c('location', 'year', 'habitattype', 'area')
+  
+#Adding the area of each land cover type surrounding t11 in 1990
+  for(k in 1:6) {
+    
+    land_cover11[k, 1] <- 'T11'
+    land_cover11[k, 2] <- '1990'
+    land_cover11[k,3] <- k
+    land_cover11[k,4] <- sum(t111990$area[t111990$DN == k])
+    
+  }
+  
+#Estimating the area of each land cover type surrounding t11 from 1991 to 2015
+  for(l in 1:25)
+  {
+    
+    for(k in 1:6) {
+    
+      land_cover11[k+(6*l), 1] <- 'T11'
+      land_cover11[k+(6*l), 2] <- as.numeric(land_cover11[k,2])+l
+      land_cover11[k+(6*l),3] <- k
+      land_cover11[k+(6*l),4] <- sum(t111990$area[t111990$DN == k]) + (t11_rate[k,2]*l)
+    
+    }
+  
+  }
+  land_cover11
+```
+
+### Assembling land cover data surrounding all ECN locations
+
+```{r joining land cover data}
+#Joining the land cover data frames into a single data frame
+  land_cover <- rbind(land_cover01, land_cover02, land_cover03, land_cover04, land_cover05, land_cover06, land_cover08, land_cover09, land_cover10, land_cover11)
+
+#Pivoting the data frame to a wide format with location, year, and each of the land cover types as columns
+  land_cover_wide<- land_cover %>% pivot_wider(.,id_cols=c(location, year),names_from = c(habitattype),values_from = area)
+  colnames(land_cover_wide) <- c('location', 'year', 'forest_area', 'arable_area', 'grassland_area', 'freshwater_area', 'urban_area', 'other_area')
+```
+
+## Met Office climate data
+```{r inputting met office data}
+#Reading in data from Met Office weather stations
+  aberporth <- read.csv("aberporth.csv")
+  armagh <- read.csv("armagh.csv")
+  ballypatrick <- read.csv("ballypatrick forest.csv")
+  bradford <- read.csv("bradford.csv")
+  braemer <- read.csv("braemer.csv")
+  cambourne <- read.csv("cambourne.csv")
+  cambridge <- read.csv("cambridge.csv")
+  cardiff <- read.csv("cardiff bute park.csv")
+  chivenor <- read.csv("chivenor.csv")
+  cwmystwyth <- read.csv("cwmystwyth.csv")
+  dunstaffnage <- read.csv("dunstaffnage.csv")
+  durham <- read.csv("durham.csv")
+  eastbourne <- read.csv("eastbourne .csv")
+  eskdalemuir <- read.csv("eskdalemuir.csv")
+  heathrow <- read.csv("heathrow.csv")
+  hurn <- read.csv("hurn.csv")
+  lerwick <- read.csv("lerwick.csv")
+  leuchars <- read.csv("leuchars.csv")
+  lowestoft <- read.csv("lowestoft.csv")
+  manston <- read.csv("manston.csv")
+  nairn <- read.csv("nairn.csv")
+  newton <- read.csv("newton rigg.csv")
+  oxford <- read.csv("oxford.csv")
+  paisely <- read.csv("paisley.csv")
+  ringway <- read.csv("ringway.csv")
+  ross <- read.csv("ross on wye.csv")
+  shawbury <- read.csv("shawbury.csv")
+  sheffield <- read.csv("sheffield.csv")
+  southampton <- read.csv("southampton.csv")
+  stornoway <- read.csv("stornoway.csv")
+  sutton <- read.csv("sutton bonington.csv")
+  tiree <- read.csv("tiree.csv")
+  valley <- read.csv("valley.csv")
+  waddington <- read.csv("waddington.csv")
+  whitby <- read.csv("whitby coastguard.csv")
+  wick <- read.csv("wick airport.csv")
+  yeovilton <- read.csv("yeovilton.csv")
+```
+
+```{r inputting distance matrix}
+#Reading in distance matrix - the distance between ECN location and each Met Office weather station
+  distance_matrix <- read.csv("distance matrix final.csv")
+```
+
+```{r calculating minimum distances from location to a station}
+#Creating an empty data frame with columns for ECN location, the nearest Met Office station, and the distance between them
+  nearest_station <- data.frame(matrix(ncol=3, nrow=10))
+  colnames(nearest_station) <- c('location', 'nearest_station', 'distance')
+  
+#Adding an ECN location to each row
+  nearest_station$location <- c('T01', 'T02', 'T03', 'T04', 'T05', 'T06', 'T08', 'T09', 'T10', 'T11')
+  
+#Calculating the nearest Met Office station to each ECN location and the distance between them
+  for(m in 1:10){
+    
+    min_distance <- min(distance_matrix[m,2:38])
+    
+    nearest_station[m,2] <- names(distance_matrix)[distance_matrix[m,]==min_distance]
+    
+    nearest_station[m,3] <- min_distance
+  }
+  nearest_station
+```
+
+### Winter climate at T01 and T08
+It has been previously shown that climate from December to March can predict spawning time
+```{r T01 and T08 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Oxford Met Office weather station
+  oxford_tmax <- oxford[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  oxford_tmax_wide<- oxford_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_tmax_wide)) {
+    
+    oxford_tmax_wide[n,14] <- mean(c(as.numeric(oxford_tmax_wide[n-1, 13]), as.numeric(oxford_tmax_wide[n, 2]), as.numeric(oxford_tmax_wide[n, 3]), as.numeric(oxford_tmax_wide[n, 4])))
+    
+  }
+  colnames(oxford_tmax_wide)[colnames(oxford_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  oxford_winter_tmax <- oxford_tmax_wide[, c(1,14)]
+  head(oxford_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Oxford Met Office weather station
+  oxford_tmin <- oxford[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  oxford_tmin_wide<- oxford_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_tmin_wide)) {
+    
+    oxford_tmin_wide[n,14] <- mean(c(as.numeric(oxford_tmin_wide[n-1, 13]), as.numeric(oxford_tmin_wide[n, 2]), as.numeric(oxford_tmin_wide[n, 3]), as.numeric(oxford_tmin_wide[n, 4])))
+    
+  }
+  colnames(oxford_tmin_wide)[colnames(oxford_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  oxford_winter_tmin <- oxford_tmin_wide[, c(1,14)]
+  head(oxford_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Oxford Met Office weather station
+  oxford_af <- oxford[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  oxford_af_wide<- oxford_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_af_wide)) {
+    
+    oxford_af_wide[n,14] <- mean(c(as.numeric(oxford_af_wide[n-1, 13]), as.numeric(oxford_af_wide[n, 2]), as.numeric(oxford_af_wide[n, 3]), as.numeric(oxford_af_wide[n, 4])))
+    
+  }
+  colnames(oxford_af_wide)[colnames(oxford_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  oxford_winter_af <- oxford_af_wide[, c(1,14)]
+  head(oxford_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Oxford Met Office weather station
+  oxford_rain<- oxford[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  oxford_rain_wide<- oxford_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_rain_wide)) {
+    
+    oxford_rain_wide[n,14] <- mean(c(as.numeric(oxford_rain_wide[n-1, 13]), as.numeric(oxford_rain_wide[n, 2]), as.numeric(oxford_rain_wide[n, 3]), as.numeric(oxford_rain_wide[n, 4])))
+    
+  }
+  colnames(oxford_rain_wide)[colnames(oxford_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  oxford_winter_rain <- oxford_rain_wide[, c(1,14)]
+  head(oxford_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Oxford Met Office weather station
+  oxford_sun<- oxford[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  oxford_sun_wide<- oxford_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_sun_wide)) {
+    
+    oxford_sun_wide[n,14] <- mean(c(as.numeric(oxford_sun_wide[n-1, 13]), as.numeric(oxford_sun_wide[n, 2]), as.numeric(oxford_sun_wide[n, 3]), as.numeric(oxford_sun_wide[n, 4])))
+    
+  }
+  colnames(oxford_sun_wide)[colnames(oxford_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  oxford_winter_sun <- oxford_sun_wide[, c(1,14)]
+  head(oxford_winter_sun)
+
+#Joining the Oxford Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T01
+  t01_winter_climate = merge(x=oxford_winter_tmax,y=oxford_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t01_winter_climate = merge(x=t01_winter_climate,y=oxford_winter_af,by=c("yyyy"),all.x=TRUE)
+  t01_winter_climate = merge(x=t01_winter_climate,y=oxford_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t01_winter_climate = merge(x=t01_winter_climate,y=oxford_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t01_winter_climate$location = "T01"
+  t01_winter_climate
+  
+#Joining the Oxford Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T08
+  t08_winter_climate = merge(x=oxford_winter_tmax,y=oxford_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t08_winter_climate = merge(x=t08_winter_climate,y=oxford_winter_af,by=c("yyyy"),all.x=TRUE)
+  t08_winter_climate = merge(x=t08_winter_climate,y=oxford_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t08_winter_climate = merge(x=t08_winter_climate,y=oxford_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t08_winter_climate$location = "T08"
+  t08_winter_climate
+```
+
+### Winter climate at T02
+```{r T02 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Braemer Met Office weather station
+  braemer_tmax <- braemer[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  braemer_tmax_wide<- braemer_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_tmax_wide)) {
+    
+    braemer_tmax_wide[n,14] <- mean(c(as.numeric(braemer_tmax_wide[n-1, 13]), as.numeric(braemer_tmax_wide[n, 2]), as.numeric(braemer_tmax_wide[n, 3]), as.numeric(braemer_tmax_wide[n, 4])))
+    
+  }
+  colnames(braemer_tmax_wide)[colnames(braemer_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  braemer_winter_tmax <- braemer_tmax_wide[, c(1,14)]
+  head(braemer_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Braemer Met Office weather station
+  braemer_tmin <- braemer[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  braemer_tmin_wide<- braemer_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_tmin_wide)) {
+    
+    braemer_tmin_wide[n,14] <- mean(c(as.numeric(braemer_tmin_wide[n-1, 13]), as.numeric(braemer_tmin_wide[n, 2]), as.numeric(braemer_tmin_wide[n, 3]), as.numeric(braemer_tmin_wide[n, 4])))
+    
+  }
+  colnames(braemer_tmin_wide)[colnames(braemer_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  braemer_winter_tmin <- braemer_tmin_wide[, c(1,14)]
+  head(braemer_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Braemer Met Office weather station
+  braemer_af <- braemer[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  braemer_af_wide<- braemer_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_af_wide)) {
+    
+    braemer_af_wide[n,14] <- mean(c(as.numeric(braemer_af_wide[n-1, 13]), as.numeric(braemer_af_wide[n, 2]), as.numeric(braemer_af_wide[n, 3]), as.numeric(braemer_af_wide[n, 4])))
+    
+  }
+  colnames(braemer_af_wide)[colnames(braemer_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  braemer_winter_af <- braemer_af_wide[, c(1,14)]
+  head(braemer_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Braemer Met Office weather station
+  braemer_rain<- braemer[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  braemer_rain_wide<- braemer_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_rain_wide)) {
+    
+    braemer_rain_wide[n,14] <- mean(c(as.numeric(braemer_rain_wide[n-1, 13]), as.numeric(braemer_rain_wide[n, 2]), as.numeric(braemer_rain_wide[n, 3]), as.numeric(braemer_rain_wide[n, 4])))
+    
+  }
+  colnames(braemer_rain_wide)[colnames(braemer_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  braemer_winter_rain <- braemer_rain_wide[, c(1,14)]
+  head(braemer_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Braemer Met Office weather station
+  braemer_sun<- braemer[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  braemer_sun_wide<- braemer_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_sun_wide)) {
+    
+    braemer_sun_wide[n,14] <- mean(c(as.numeric(braemer_sun_wide[n-1, 13]), as.numeric(braemer_sun_wide[n, 2]), as.numeric(braemer_sun_wide[n, 3]), as.numeric(braemer_sun_wide[n, 4])))
+    
+  }
+  colnames(braemer_sun_wide)[colnames(braemer_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  braemer_winter_sun <- braemer_sun_wide[, c(1,14)]
+  head(braemer_winter_sun)
+
+#Joining the Braemer Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T02
+  t02_winter_climate = merge(x=braemer_winter_tmax,y=braemer_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t02_winter_climate = merge(x=t02_winter_climate,y=braemer_winter_af,by=c("yyyy"),all.x=TRUE)
+  t02_winter_climate = merge(x=t02_winter_climate,y=braemer_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t02_winter_climate = merge(x=t02_winter_climate,y=braemer_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t02_winter_climate$location = "T02"
+  t02_winter_climate
+```
+
+### Winter climate at T03
+```{r T03 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Armagh Met Office weather station
+  armagh_tmax <- armagh[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  armagh_tmax_wide<- armagh_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_tmax_wide)) {
+    
+    armagh_tmax_wide[n,14] <- mean(c(as.numeric(armagh_tmax_wide[n-1, 13]), as.numeric(armagh_tmax_wide[n, 2]), as.numeric(armagh_tmax_wide[n, 3]), as.numeric(armagh_tmax_wide[n, 4])))
+    
+  }
+  colnames(armagh_tmax_wide)[colnames(armagh_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  armagh_winter_tmax <- armagh_tmax_wide[, c(1,14)]
+  head(armagh_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Armagh Met Office weather station
+  armagh_tmin <- armagh[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  armagh_tmin_wide<- armagh_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_tmin_wide)) {
+    
+    armagh_tmin_wide[n,14] <- mean(c(as.numeric(armagh_tmin_wide[n-1, 13]), as.numeric(armagh_tmin_wide[n, 2]), as.numeric(armagh_tmin_wide[n, 3]), as.numeric(armagh_tmin_wide[n, 4])))
+    
+  }
+  colnames(armagh_tmin_wide)[colnames(armagh_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  armagh_winter_tmin <- armagh_tmin_wide[, c(1,14)]
+  head(armagh_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Armagh Met Office weather station
+  armagh_af <- armagh[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  armagh_af_wide<- armagh_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_af_wide)) {
+    
+    armagh_af_wide[n,14] <- mean(c(as.numeric(armagh_af_wide[n-1, 13]), as.numeric(armagh_af_wide[n, 2]), as.numeric(armagh_af_wide[n, 3]), as.numeric(armagh_af_wide[n, 4])))
+    
+  }
+  colnames(armagh_af_wide)[colnames(armagh_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  armagh_winter_af <- armagh_af_wide[, c(1,14)]
+  head(armagh_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Armagh Met Office weather station
+  armagh_rain<- armagh[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  armagh_rain_wide<- armagh_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_rain_wide)) {
+    
+    armagh_rain_wide[n,14] <- mean(c(as.numeric(armagh_rain_wide[n-1, 13]), as.numeric(armagh_rain_wide[n, 2]), as.numeric(armagh_rain_wide[n, 3]), as.numeric(armagh_rain_wide[n, 4])))
+    
+  }
+  colnames(armagh_rain_wide)[colnames(armagh_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  armagh_winter_rain <- armagh_rain_wide[, c(1,14)]
+  head(armagh_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Armagh Met Office weather station
+  armagh_sun<- armagh[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  armagh_sun_wide<- armagh_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_sun_wide)) {
+    
+    armagh_sun_wide[n,14] <- mean(c(as.numeric(armagh_sun_wide[n-1, 13]), as.numeric(armagh_sun_wide[n, 2]), as.numeric(armagh_sun_wide[n, 3]), as.numeric(armagh_sun_wide[n, 4])))
+    
+  }
+  colnames(armagh_sun_wide)[colnames(armagh_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  armagh_winter_sun <- armagh_sun_wide[, c(1,14)]
+  head(armagh_winter_sun)
+
+#Joining the Armagh Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T03
+  t03_winter_climate = merge(x=armagh_winter_tmax,y=armagh_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t03_winter_climate = merge(x=t03_winter_climate,y=armagh_winter_af,by=c("yyyy"),all.x=TRUE)
+  t03_winter_climate = merge(x=t03_winter_climate,y=armagh_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t03_winter_climate = merge(x=t03_winter_climate,y=armagh_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t03_winter_climate$location = "T03"
+  t03_winter_climate
+```
+
+### Winter climate at T04
+```{r T04 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Newton Met Office weather station
+  newton_tmax <- newton[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  newton_tmax_wide<- newton_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Newton Met Office weather station
+  for(n in 2:nrow(newton_tmax_wide)) {
+    
+    newton_tmax_wide[n,14] <- mean(c(as.numeric(newton_tmax_wide[n-1, 13]), as.numeric(newton_tmax_wide[n, 2]), as.numeric(newton_tmax_wide[n, 3]), as.numeric(newton_tmax_wide[n, 4])))
+    
+  }
+  colnames(newton_tmax_wide)[colnames(newton_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  newton_winter_tmax <- newton_tmax_wide[, c(1,14)]
+  head(newton_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Newton Met Office weather station
+  newton_tmin <- newton[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  newton_tmin_wide<- newton_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Newton Met Office weather station
+  for(n in 2:nrow(newton_tmin_wide)) {
+    
+    newton_tmin_wide[n,14] <- mean(c(as.numeric(newton_tmin_wide[n-1, 13]), as.numeric(newton_tmin_wide[n, 2]), as.numeric(newton_tmin_wide[n, 3]), as.numeric(newton_tmin_wide[n, 4])))
+    
+  }
+  colnames(newton_tmin_wide)[colnames(newton_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  newton_winter_tmin <- newton_tmin_wide[, c(1,14)]
+  head(newton_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Newton Met Office weather station
+  newton_af <- newton[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  newton_af_wide<- newton_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Newton Met Office weather station
+  for(n in 2:nrow(newton_af_wide)) {
+    
+    newton_af_wide[n,14] <- mean(c(as.numeric(newton_af_wide[n-1, 13]), as.numeric(newton_af_wide[n, 2]), as.numeric(newton_af_wide[n, 3]), as.numeric(newton_af_wide[n, 4])))
+    
+  }
+  colnames(newton_af_wide)[colnames(newton_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  newton_winter_af <- newton_af_wide[, c(1,14)]
+  head(newton_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Newton Met Office weather station
+  newton_rain<- newton[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  newton_rain_wide<- newton_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Newton Met Office weather station
+  for(n in 2:nrow(newton_rain_wide)) {
+    
+    newton_rain_wide[n,14] <- mean(c(as.numeric(newton_rain_wide[n-1, 13]), as.numeric(newton_rain_wide[n, 2]), as.numeric(newton_rain_wide[n, 3]), as.numeric(newton_rain_wide[n, 4])))
+    
+  }
+  colnames(newton_rain_wide)[colnames(newton_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  newton_winter_rain <- newton_rain_wide[, c(1,14)]
+  head(newton_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Newton Met Office weather station
+  newton_sun<- newton[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  newton_sun_wide<- newton_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Newton Met Office weather station
+  for(n in 2:nrow(newton_sun_wide)) {
+    
+    newton_sun_wide[n,14] <- mean(c(as.numeric(newton_sun_wide[n-1, 13]), as.numeric(newton_sun_wide[n, 2]), as.numeric(newton_sun_wide[n, 3]), as.numeric(newton_sun_wide[n, 4])))
+    
+  }
+  colnames(newton_sun_wide)[colnames(newton_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  newton_winter_sun <- newton_sun_wide[, c(1,14)]
+  head(newton_winter_sun)
+
+#Joining the Newton Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T04
+  t04_winter_climate = merge(x=newton_winter_tmax,y=newton_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t04_winter_climate = merge(x=t04_winter_climate,y=newton_winter_af,by=c("yyyy"),all.x=TRUE)
+  t04_winter_climate = merge(x=t04_winter_climate,y=newton_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t04_winter_climate = merge(x=t04_winter_climate,y=newton_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t04_winter_climate$location = "T04"
+  t04_winter_climate
+```
+
+### Winter climate at T05
+```{r T05 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Chivenor Met Office weather station
+  chivenor_tmax <- chivenor[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  chivenor_tmax_wide<- chivenor_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_tmax_wide)) {
+    
+    chivenor_tmax_wide[n,14] <- mean(c(as.numeric(chivenor_tmax_wide[n-1, 13]), as.numeric(chivenor_tmax_wide[n, 2]), as.numeric(chivenor_tmax_wide[n, 3]), as.numeric(chivenor_tmax_wide[n, 4])))
+    
+  }
+  colnames(chivenor_tmax_wide)[colnames(chivenor_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  chivenor_winter_tmax <- chivenor_tmax_wide[, c(1,14)]
+  head(chivenor_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Chivenor Met Office weather station
+  chivenor_tmin <- chivenor[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  chivenor_tmin_wide<- chivenor_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_tmin_wide)) {
+    
+    chivenor_tmin_wide[n,14] <- mean(c(as.numeric(chivenor_tmin_wide[n-1, 13]), as.numeric(chivenor_tmin_wide[n, 2]), as.numeric(chivenor_tmin_wide[n, 3]), as.numeric(chivenor_tmin_wide[n, 4])))
+    
+  }
+  colnames(chivenor_tmin_wide)[colnames(chivenor_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  chivenor_winter_tmin <- chivenor_tmin_wide[, c(1,14)]
+  head(chivenor_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Chivenor Met Office weather station
+  chivenor_af <- chivenor[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  chivenor_af_wide<- chivenor_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_af_wide)) {
+    
+    chivenor_af_wide[n,14] <- mean(c(as.numeric(chivenor_af_wide[n-1, 13]), as.numeric(chivenor_af_wide[n, 2]), as.numeric(chivenor_af_wide[n, 3]), as.numeric(chivenor_af_wide[n, 4])))
+    
+  }
+  colnames(chivenor_af_wide)[colnames(chivenor_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  chivenor_winter_af <- chivenor_af_wide[, c(1,14)]
+  head(chivenor_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Chivenor Met Office weather station
+  chivenor_rain<- chivenor[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  chivenor_rain_wide<- chivenor_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_rain_wide)) {
+    
+    chivenor_rain_wide[n,14] <- mean(c(as.numeric(chivenor_rain_wide[n-1, 13]), as.numeric(chivenor_rain_wide[n, 2]), as.numeric(chivenor_rain_wide[n, 3]), as.numeric(chivenor_rain_wide[n, 4])))
+    
+  }
+  colnames(chivenor_rain_wide)[colnames(chivenor_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  chivenor_winter_rain <- chivenor_rain_wide[, c(1,14)]
+  head(chivenor_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Chivenor Met Office weather station
+  chivenor_sun<- chivenor[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  chivenor_sun_wide<- chivenor_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_sun_wide)) {
+    
+    chivenor_sun_wide[n,14] <- mean(c(as.numeric(chivenor_sun_wide[n-1, 13]), as.numeric(chivenor_sun_wide[n, 2]), as.numeric(chivenor_sun_wide[n, 3]), as.numeric(chivenor_sun_wide[n, 4])))
+    
+  }
+  colnames(chivenor_sun_wide)[colnames(chivenor_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  chivenor_winter_sun <- chivenor_sun_wide[, c(1,14)]
+  head(chivenor_winter_sun)
+
+#Joining the Chivenor Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T05
+  t05_winter_climate = merge(x=chivenor_winter_tmax,y=chivenor_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t05_winter_climate = merge(x=t05_winter_climate,y=chivenor_winter_af,by=c("yyyy"),all.x=TRUE)
+  t05_winter_climate = merge(x=t05_winter_climate,y=chivenor_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t05_winter_climate = merge(x=t05_winter_climate,y=chivenor_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t05_winter_climate$location = "T05"
+  t05_winter_climate
+```
+
+### Winter climate at T06 and T09
+```{r T06 and T09 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Heathrow Met Office weather station
+  heathrow_tmax <- heathrow[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  heathrow_tmax_wide<- heathrow_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_tmax_wide)) {
+    
+    heathrow_tmax_wide[n,14] <- mean(c(as.numeric(heathrow_tmax_wide[n-1, 13]), as.numeric(heathrow_tmax_wide[n, 2]), as.numeric(heathrow_tmax_wide[n, 3]), as.numeric(heathrow_tmax_wide[n, 4])))
+    
+  }
+  colnames(heathrow_tmax_wide)[colnames(heathrow_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  heathrow_winter_tmax <- heathrow_tmax_wide[, c(1,14)]
+  head(heathrow_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Heathrow Met Office weather station
+  heathrow_tmin <- heathrow[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  heathrow_tmin_wide<- heathrow_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_tmin_wide)) {
+    
+    heathrow_tmin_wide[n,14] <- mean(c(as.numeric(heathrow_tmin_wide[n-1, 13]), as.numeric(heathrow_tmin_wide[n, 2]), as.numeric(heathrow_tmin_wide[n, 3]), as.numeric(heathrow_tmin_wide[n, 4])))
+    
+  }
+  colnames(heathrow_tmin_wide)[colnames(heathrow_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  heathrow_winter_tmin <- heathrow_tmin_wide[, c(1,14)]
+  head(heathrow_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Heathrow Met Office weather station
+  heathrow_af <- heathrow[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  heathrow_af_wide<- heathrow_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_af_wide)) {
+    
+    heathrow_af_wide[n,14] <- mean(c(as.numeric(heathrow_af_wide[n-1, 13]), as.numeric(heathrow_af_wide[n, 2]), as.numeric(heathrow_af_wide[n, 3]), as.numeric(heathrow_af_wide[n, 4])))
+    
+  }
+  colnames(heathrow_af_wide)[colnames(heathrow_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  heathrow_winter_af <- heathrow_af_wide[, c(1,14)]
+  head(heathrow_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Heathrow Met Office weather station
+  heathrow_rain<- heathrow[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  heathrow_rain_wide<- heathrow_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_rain_wide)) {
+    
+    heathrow_rain_wide[n,14] <- mean(c(as.numeric(heathrow_rain_wide[n-1, 13]), as.numeric(heathrow_rain_wide[n, 2]), as.numeric(heathrow_rain_wide[n, 3]), as.numeric(heathrow_rain_wide[n, 4])))
+    
+  }
+  colnames(heathrow_rain_wide)[colnames(heathrow_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  heathrow_winter_rain <- heathrow_rain_wide[, c(1,14)]
+  head(heathrow_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Heathrow Met Office weather station
+  heathrow_sun<- heathrow[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  heathrow_sun_wide<- heathrow_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_sun_wide)) {
+    
+    heathrow_sun_wide[n,14] <- mean(c(as.numeric(heathrow_sun_wide[n-1, 13]), as.numeric(heathrow_sun_wide[n, 2]), as.numeric(heathrow_sun_wide[n, 3]), as.numeric(heathrow_sun_wide[n, 4])))
+    
+  }
+  colnames(heathrow_sun_wide)[colnames(heathrow_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  heathrow_winter_sun <- heathrow_sun_wide[, c(1,14)]
+  head(heathrow_winter_sun)
+
+#Joining the Heathrow Met Office station winter climate data frames into a single data frame to use as an estimate as winter climate for ECN location T06
+  t06_winter_climate = merge(x=heathrow_winter_tmax,y=heathrow_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t06_winter_climate = merge(x=t06_winter_climate,y=heathrow_winter_af,by=c("yyyy"),all.x=TRUE)
+  t06_winter_climate = merge(x=t06_winter_climate,y=heathrow_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t06_winter_climate = merge(x=t06_winter_climate,y=heathrow_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t06_winter_climate$location = "T06"
+  t06_winter_climate
+
+#Joinging the Heathrpw Met Office station winter climate data frames into a signle data frame to use as an estimate of winter climate for ECN location T09
+  t09_winter_climate = merge(x=heathrow_winter_tmax,y=heathrow_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t09_winter_climate = merge(x=t09_winter_climate,y=heathrow_winter_af,by=c("yyyy"),all.x=TRUE)
+  t09_winter_climate = merge(x=t09_winter_climate,y=heathrow_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t09_winter_climate = merge(x=t09_winter_climate,y=heathrow_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t09_winter_climate$location = "T09"
+  t09_winter_climate
+```
+
+### Winter climate at T10
+```{r T10 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Southampton Met Office weather station
+  southampton_tmax <- southampton[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  southampton_tmax_wide<- southampton_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_tmax_wide)) {
+    
+    southampton_tmax_wide[n,14] <- mean(c(as.numeric(southampton_tmax_wide[n-1, 13]), as.numeric(southampton_tmax_wide[n, 2]), as.numeric(southampton_tmax_wide[n, 3]), as.numeric(southampton_tmax_wide[n, 4])))
+    
+  }
+  colnames(southampton_tmax_wide)[colnames(southampton_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  southampton_winter_tmax <- southampton_tmax_wide[, c(1,14)]
+  head(southampton_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Southampton Met Office weather station
+  southampton_tmin <- southampton[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  southampton_tmin_wide<- southampton_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_tmin_wide)) {
+    
+    southampton_tmin_wide[n,14] <- mean(c(as.numeric(southampton_tmin_wide[n-1, 13]), as.numeric(southampton_tmin_wide[n, 2]), as.numeric(southampton_tmin_wide[n, 3]), as.numeric(southampton_tmin_wide[n, 4])))
+    
+  }
+  colnames(southampton_tmin_wide)[colnames(southampton_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  southampton_winter_tmin <- southampton_tmin_wide[, c(1,14)]
+  head(southampton_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Southampton Met Office weather station
+  southampton_af <- southampton[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  southampton_af_wide<- southampton_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_af_wide)) {
+    
+    southampton_af_wide[n,14] <- mean(c(as.numeric(southampton_af_wide[n-1, 13]), as.numeric(southampton_af_wide[n, 2]), as.numeric(southampton_af_wide[n, 3]), as.numeric(southampton_af_wide[n, 4])))
+    
+  }
+  colnames(southampton_af_wide)[colnames(southampton_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  southampton_winter_af <- southampton_af_wide[, c(1,14)]
+  head(southampton_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Southampton Met Office weather station
+  southampton_rain<- southampton[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  southampton_rain_wide<- southampton_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_rain_wide)) {
+    
+    southampton_rain_wide[n,14] <- mean(c(as.numeric(southampton_rain_wide[n-1, 13]), as.numeric(southampton_rain_wide[n, 2]), as.numeric(southampton_rain_wide[n, 3]), as.numeric(southampton_rain_wide[n, 4])))
+    
+  }
+  colnames(southampton_rain_wide)[colnames(southampton_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  southampton_winter_rain <- southampton_rain_wide[, c(1,14)]
+  head(southampton_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Southampton Met Office weather station
+  southampton_sun<- southampton[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  southampton_sun_wide<- southampton_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_sun_wide)) {
+    
+    southampton_sun_wide[n,14] <- mean(c(as.numeric(southampton_sun_wide[n-1, 13]), as.numeric(southampton_sun_wide[n, 2]), as.numeric(southampton_sun_wide[n, 3]), as.numeric(southampton_sun_wide[n, 4])))
+    
+  }
+  colnames(southampton_sun_wide)[colnames(southampton_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  southampton_winter_sun <- southampton_sun_wide[, c(1,14)]
+  head(southampton_winter_sun)
+
+#Joining the Southampton Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T10
+  t10_winter_climate = merge(x=southampton_winter_tmax,y=southampton_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t10_winter_climate = merge(x=t10_winter_climate,y=southampton_winter_af,by=c("yyyy"),all.x=TRUE)
+  t10_winter_climate = merge(x=t10_winter_climate,y=southampton_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t10_winter_climate = merge(x=t10_winter_climate,y=southampton_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t10_winter_climate$location = "T10"
+  t10_winter_climate
+```
+
+### Winter climate at T11
+```{r T11 calculating average climate parameters from previous winter}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Valley Met Office weather station
+  valley_tmax <- valley[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  valley_tmax_wide<- valley_tmax %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average winter (December-March) daily maximum temperature at the Valley Met Office weather station
+  for(n in 2:nrow(valley_tmax_wide)) {
+    
+    valley_tmax_wide[n,14] <- mean(c(as.numeric(valley_tmax_wide[n-1, 13]), as.numeric(valley_tmax_wide[n, 2]), as.numeric(valley_tmax_wide[n, 3]), as.numeric(valley_tmax_wide[n, 4])))
+    
+  }
+  colnames(valley_tmax_wide)[colnames(valley_tmax_wide) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average winter daily maximum temperature
+  valley_winter_tmax <- valley_tmax_wide[, c(1,14)]
+  head(valley_winter_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Valley Met Office weather station
+  valley_tmin <- valley[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  valley_tmin_wide<- valley_tmin %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average winter (December-March) daily minimum temperature at the Valley Met Office weather station
+  for(n in 2:nrow(valley_tmin_wide)) {
+    
+    valley_tmin_wide[n,14] <- mean(c(as.numeric(valley_tmin_wide[n-1, 13]), as.numeric(valley_tmin_wide[n, 2]), as.numeric(valley_tmin_wide[n, 3]), as.numeric(valley_tmin_wide[n, 4])))
+    
+  }
+  colnames(valley_tmin_wide)[colnames(valley_tmin_wide) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average winter daily minimum temperature
+  valley_winter_tmin <- valley_tmin_wide[, c(1,14)]
+  head(valley_winter_tmin)
+
+#Creating a data frame with the monthly days with frost at the Valley Met Office weather station
+  valley_af <- valley[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  valley_af_wide<- valley_af %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average winter (December-March) monthly days with frost at the Valley Met Office weather station
+  for(n in 2:nrow(valley_af_wide)) {
+    
+    valley_af_wide[n,14] <- mean(c(as.numeric(valley_af_wide[n-1, 13]), as.numeric(valley_af_wide[n, 2]), as.numeric(valley_af_wide[n, 3]), as.numeric(valley_af_wide[n, 4])))
+    
+  }
+  colnames(valley_af_wide)[colnames(valley_af_wide) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average winter monthly days with frost
+  valley_winter_af <- valley_af_wide[, c(1,14)]
+  head(valley_winter_af)
+
+#Creating a data frame with the monthly total rainfall at the Valley Met Office weather station
+  valley_rain<- valley[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  valley_rain_wide<- valley_rain %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average winter (December-March) monthly rainfall at the Valley Met Office weather station
+  for(n in 2:nrow(valley_rain_wide)) {
+    
+    valley_rain_wide[n,14] <- mean(c(as.numeric(valley_rain_wide[n-1, 13]), as.numeric(valley_rain_wide[n, 2]), as.numeric(valley_rain_wide[n, 3]), as.numeric(valley_rain_wide[n, 4])))
+    
+  }
+  colnames(valley_rain_wide)[colnames(valley_rain_wide) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average winter monthly rainfall
+  valley_winter_rain <- valley_rain_wide[, c(1,14)]
+  head(valley_winter_rain)
+
+#Creating a data frame with the monthly total hours with sun at the Valley Met Office weather station
+  valley_sun<- valley[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  valley_sun_wide<- valley_sun %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average winter (December-March) monthly hours with sun at the Valley Met Office weather station
+  for(n in 2:nrow(valley_sun_wide)) {
+    
+    valley_sun_wide[n,14] <- mean(c(as.numeric(valley_sun_wide[n-1, 13]), as.numeric(valley_sun_wide[n, 2]), as.numeric(valley_sun_wide[n, 3]), as.numeric(valley_sun_wide[n, 4])))
+    
+  }
+  colnames(valley_sun_wide)[colnames(valley_sun_wide) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average winter monthly hours with sun
+  valley_winter_sun <- valley_sun_wide[, c(1,14)]
+  head(valley_winter_sun)
+
+#Joining the Valley Met Office station winter climate data frames into a single data frame to use as an estimate of winter climate for ECN location T11
+
+  t11_winter_climate = merge(x=valley_winter_tmax,y=valley_winter_tmin,by=c("yyyy"),all.x=TRUE)
+  t11_winter_climate = merge(x=t11_winter_climate,y=valley_winter_af,by=c("yyyy"),all.x=TRUE)
+  t11_winter_climate = merge(x=t11_winter_climate,y=valley_winter_rain,by=c("yyyy"),all.x=TRUE)
+  t11_winter_climate = merge(x=t11_winter_climate,y=valley_winter_sun,by=c("yyyy"),all.x=TRUE)
+  t11_winter_climate$location = "T11"
+  t11_winter_climate
+```
+
+### Assembling winter climate data for all ECN locations
+```{r joining winter_climate for all locations}
+#Joining the winter climate data frames for all the ECN locations into a single data frame
+  winter_climate <- rbind(t01_winter_climate, t02_winter_climate, t03_winter_climate, t04_winter_climate, t05_winter_climate, t06_winter_climate, t08_winter_climate, t09_winter_climate, t10_winter_climate, t11_winter_climate)
+  colnames(winter_climate)[colnames(winter_climate) == "yyyy"] <- "year"
+  head(winter_climate)
+```
+
+### Climate when spawn is present at T01 and T08
+
+```{r time when spawn is present}
+#Identifying the months spawn was present for
+  min(pond_wide$spawn_yearday[is.na(pond_wide$spawn_yearday)==FALSE]) #yearday 8 = jan
+  max(pond_wide$hatch_yearday[is.na(pond_wide$hatch_yearday)==FALSE]) #yearday 149 = may
+```
+
+```{r T01 and T08 calculating average climate parameters whilst spawn is present}
+
+#Creating a data frame with the monthly average of daily maximum temperatures at the Oxford Met Office weather station
+  oxford_tmax2 <- oxford[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  oxford_tmax_wide2<- oxford_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_tmax_wide2)) {
+    
+    oxford_tmax_wide2[n,14] <- mean(c(as.numeric(oxford_tmax_wide2[n, 2]), as.numeric(oxford_tmax_wide2[n, 3]), as.numeric(oxford_tmax_wide2[n, 4]), as.numeric(oxford_tmax_wide2[n, 5]), as.numeric(oxford_tmax_wide2[n, 6])))
+    
+  }
+  colnames(oxford_tmax_wide2)[colnames(oxford_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  oxford_spawn_tmax <- oxford_tmax_wide2[, c(1,14)]
+  head(oxford_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Oxford Met Office weather station
+  oxford_tmin2 <- oxford[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  oxford_tmin_wide2<- oxford_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_tmin_wide2)) {
+    
+    oxford_tmin_wide2[n,14] <- mean(c(as.numeric(oxford_tmin_wide2[n, 2]), as.numeric(oxford_tmin_wide2[n, 3]), as.numeric(oxford_tmin_wide2[n, 4]), as.numeric(oxford_tmin_wide2[n, 5]), as.numeric(oxford_tmin_wide2[n, 6])))
+    
+  }
+  colnames(oxford_tmin_wide2)[colnames(oxford_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  oxford_spawn_tmin <- oxford_tmin_wide2[, c(1,14)]
+  head(oxford_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Oxford Met Office weather station
+  oxford_af2 <- oxford[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  oxford_af_wide2<- oxford_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_af_wide2)) {
+    
+    oxford_af_wide2[n,14] <- mean(c(as.numeric(oxford_af_wide2[n, 2]), as.numeric(oxford_af_wide2[n, 3]), as.numeric(oxford_af_wide2[n, 4]), as.numeric(oxford_af_wide2[n, 5]), as.numeric(oxford_af_wide2[n, 6])))
+    
+  }
+  colnames(oxford_af_wide2)[colnames(oxford_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  oxford_spawn_af <- oxford_af_wide2[, c(1,14)]
+  head(oxford_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Oxford Met Office weather station
+  oxford_rain2 <- oxford[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  oxford_rain_wide2<- oxford_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_rain_wide2)) {
+    
+    oxford_rain_wide2[n,14] <- mean(c(as.numeric(oxford_rain_wide2[n, 2]), as.numeric(oxford_rain_wide2[n, 3]), as.numeric(oxford_rain_wide2[n, 4]), as.numeric(oxford_rain_wide2[n, 5]), as.numeric(oxford_rain_wide2[n, 6])))
+    
+  }
+  colnames(oxford_rain_wide2)[colnames(oxford_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  oxford_spawn_rain <- oxford_rain_wide2[, c(1,14)]
+  head(oxford_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Oxford Met Office weather station
+  oxford_sun2 <- oxford[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  oxford_sun_wide2<- oxford_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_sun_wide2)) {
+    
+    oxford_sun_wide2[n,14] <- mean(c(as.numeric(oxford_sun_wide2[n, 2]), as.numeric(oxford_sun_wide2[n, 3]), as.numeric(oxford_sun_wide2[n, 4]), as.numeric(oxford_sun_wide2[n, 5]), as.numeric(oxford_sun_wide2[n, 6])))
+    
+  }
+  colnames(oxford_sun_wide2)[colnames(oxford_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  oxford_spawn_sun <- oxford_sun_wide2[, c(1,14)]
+  head(oxford_spawn_sun)
+
+#Joining the Oxford Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T01
+  t01_spawn_climate = merge(x=oxford_spawn_tmax,y=oxford_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t01_spawn_climate = merge(x=t01_spawn_climate,y=oxford_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t01_spawn_climate = merge(x=t01_spawn_climate,y=oxford_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t01_spawn_climate = merge(x=t01_spawn_climate,y=oxford_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t01_spawn_climate$location = "T01"
+  t01_spawn_climate
+
+#Joining the Oxford Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T08
+  t08_spawn_climate = merge(x=oxford_spawn_tmax,y=oxford_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t08_spawn_climate = merge(x=t08_spawn_climate,y=oxford_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t08_spawn_climate = merge(x=t08_spawn_climate,y=oxford_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t08_spawn_climate = merge(x=t08_spawn_climate,y=oxford_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t08_spawn_climate$location = "T08"
+  t08_spawn_climate
+```
+
+### Climate when spawn is present at T02
+```{r T02 calculating average climate parameters from previous spring}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Braemer Met Office weather station
+  braemer_tmax2 <- braemer[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  braemer_tmax_wide2<- braemer_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Braemer Met Office weather station
+for(n in 2:nrow(braemer_tmax_wide2)) {
+    
+    braemer_tmax_wide2[n,14] <- mean(c(as.numeric(braemer_tmax_wide2[n, 2]), as.numeric(braemer_tmax_wide2[n, 3]), as.numeric(braemer_tmax_wide2[n, 4]), as.numeric(braemer_tmax_wide2[n, 5]), as.numeric(braemer_tmax_wide2[n, 6])))
+    
+  }
+  colnames(braemer_tmax_wide2)[colnames(braemer_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  braemer_spawn_tmax <- braemer_tmax_wide2[, c(1,14)]
+  head(braemer_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Braemer Met Office weather station
+  braemer_tmin2 <- braemer[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  braemer_tmin_wide2<- braemer_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_tmin_wide2)) {
+    
+    braemer_tmin_wide2[n,14] <- mean(c(as.numeric(braemer_tmin_wide2[n, 2]), as.numeric(braemer_tmin_wide2[n, 3]), as.numeric(braemer_tmin_wide2[n, 4]), as.numeric(braemer_tmin_wide2[n, 5]), as.numeric(braemer_tmin_wide2[n, 6])))
+    
+  }
+  colnames(braemer_tmin_wide2)[colnames(braemer_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  braemer_spawn_tmin <- braemer_tmin_wide2[, c(1,14)]
+  head(braemer_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Braemer Met Office weather station
+  braemer_af2 <- braemer[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  braemer_af_wide2<- braemer_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_af_wide2)) {
+    
+    braemer_af_wide2[n,14] <- mean(c(as.numeric(braemer_af_wide2[n, 2]), as.numeric(braemer_af_wide2[n, 3]), as.numeric(braemer_af_wide2[n, 4]), as.numeric(braemer_af_wide2[n, 5]), as.numeric(braemer_af_wide2[n, 6])))
+    
+  }
+  colnames(braemer_af_wide2)[colnames(braemer_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  braemer_spawn_af <- braemer_af_wide2[, c(1,14)]
+  head(braemer_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Braemer Met Office weather station
+  braemer_rain2 <- braemer[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  braemer_rain_wide2<- braemer_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_rain_wide2)) {
+    
+    braemer_rain_wide2[n,14] <- mean(c(as.numeric(braemer_rain_wide2[n, 2]), as.numeric(braemer_rain_wide2[n, 3]), as.numeric(braemer_rain_wide2[n, 4]), as.numeric(braemer_rain_wide2[n, 5]), as.numeric(braemer_rain_wide2[n, 6])))
+    
+  }
+  colnames(braemer_rain_wide2)[colnames(braemer_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  braemer_spawn_rain <- braemer_rain_wide2[, c(1,14)]
+  head(braemer_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Braemer Met Office weather station
+  braemer_sun2 <- braemer[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  braemer_sun_wide2<- braemer_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_sun_wide2)) {
+    
+    braemer_sun_wide2[n,14] <- mean(c(as.numeric(braemer_sun_wide2[n, 2]), as.numeric(braemer_sun_wide2[n, 3]), as.numeric(braemer_sun_wide2[n, 4]), as.numeric(braemer_sun_wide2[n, 5]), as.numeric(braemer_sun_wide2[n, 6])))
+    
+  }
+  colnames(braemer_sun_wide2)[colnames(braemer_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  braemer_spawn_sun <- braemer_sun_wide2[, c(1,14)]
+  head(braemer_spawn_sun)
+
+#Joining the Braemer Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T02
+  t02_spawn_climate = merge(x=braemer_spawn_tmax,y=braemer_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t02_spawn_climate = merge(x=t02_spawn_climate,y=braemer_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t02_spawn_climate = merge(x=t02_spawn_climate,y=braemer_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t02_spawn_climate = merge(x=t02_spawn_climate,y=braemer_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t02_spawn_climate$location = "T02"
+  t02_spawn_climate
+```
+
+### Climate when spawn is present at T03
+```{r T03 calculating average climate parameters from previous spring}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Armagh Met Office weather station
+  armagh_tmax2 <- armagh[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  armagh_tmax_wide2<- armagh_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_tmax_wide2)) {
+    
+    armagh_tmax_wide2[n,14] <- mean(c(as.numeric(armagh_tmax_wide2[n, 2]), as.numeric(armagh_tmax_wide2[n, 3]), as.numeric(armagh_tmax_wide2[n, 4]), as.numeric(armagh_tmax_wide2[n, 5]), as.numeric(armagh_tmax_wide2[n, 6])))
+    
+  }
+  colnames(armagh_tmax_wide2)[colnames(armagh_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  armagh_spawn_tmax <- armagh_tmax_wide2[, c(1,14)]
+  head(armagh_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Armagh Met Office weather station
+  armagh_tmin2 <- armagh[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  armagh_tmin_wide2<- armagh_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_tmin_wide2)) {
+    
+    armagh_tmin_wide2[n,14] <- mean(c(as.numeric(armagh_tmin_wide2[n, 2]), as.numeric(armagh_tmin_wide2[n, 3]), as.numeric(armagh_tmin_wide2[n, 4]), as.numeric(armagh_tmin_wide2[n, 5]), as.numeric(armagh_tmin_wide2[n, 6])))
+    
+  }
+  colnames(armagh_tmin_wide2)[colnames(armagh_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  armagh_spawn_tmin <- armagh_tmin_wide2[, c(1,14)]
+  head(armagh_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Armagh Met Office weather station
+  armagh_af2 <- armagh[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  armagh_af_wide2<- armagh_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_af_wide2)) {
+    
+    armagh_af_wide2[n,14] <- mean(c(as.numeric(armagh_af_wide2[n, 2]), as.numeric(armagh_af_wide2[n, 3]), as.numeric(armagh_af_wide2[n, 4]), as.numeric(armagh_af_wide2[n, 5]), as.numeric(armagh_af_wide2[n, 6])))
+    
+  }
+  colnames(armagh_af_wide2)[colnames(armagh_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  armagh_spawn_af <- armagh_af_wide2[, c(1,14)]
+  head(armagh_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Armagh Met Office weather station
+  armagh_rain2 <- armagh[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  armagh_rain_wide2<- armagh_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_rain_wide2)) {
+    
+    armagh_rain_wide2[n,14] <- mean(c(as.numeric(armagh_rain_wide2[n, 2]), as.numeric(armagh_rain_wide2[n, 3]), as.numeric(armagh_rain_wide2[n, 4]), as.numeric(armagh_rain_wide2[n, 5]), as.numeric(armagh_rain_wide2[n, 6])))
+    
+  }
+  colnames(armagh_rain_wide2)[colnames(armagh_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  armagh_spawn_rain <- armagh_rain_wide2[, c(1,14)]
+  head(armagh_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Armagh Met Office weather station
+  armagh_sun2 <- armagh[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  armagh_sun_wide2<- armagh_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_sun_wide2)) {
+    
+    armagh_sun_wide2[n,14] <- mean(c(as.numeric(armagh_sun_wide2[n, 2]), as.numeric(armagh_sun_wide2[n, 3]), as.numeric(armagh_sun_wide2[n, 4]), as.numeric(armagh_sun_wide2[n, 5]), as.numeric(armagh_sun_wide2[n, 6])))
+    
+  }
+  colnames(armagh_sun_wide2)[colnames(armagh_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  armagh_spawn_sun <- armagh_sun_wide2[, c(1,14)]
+  head(armagh_spawn_sun)
+
+#Joining the Armagh Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T03
+  t03_spawn_climate = merge(x=armagh_spawn_tmax,y=armagh_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t03_spawn_climate = merge(x=t03_spawn_climate,y=armagh_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t03_spawn_climate = merge(x=t03_spawn_climate,y=armagh_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t03_spawn_climate = merge(x=t03_spawn_climate,y=armagh_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t03_spawn_climate$location = "T03"
+  t03_spawn_climate
+```
+
+### Climate when spawn is present at T04
+```{r T04 calculating average climate parameters from previous spring}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Newton Met Office weather station
+  newton_tmax2 <- newton[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+newton_tmax_wide2<- newton_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Newton Met Office weather station
+  for(n in 2:nrow(newton_tmax_wide2)) {
+    
+    newton_tmax_wide2[n,14] <- mean(c(as.numeric(newton_tmax_wide2[n, 2]), as.numeric(newton_tmax_wide2[n, 3]), as.numeric(newton_tmax_wide2[n, 4]), as.numeric(newton_tmax_wide2[n, 5]), as.numeric(newton_tmax_wide2[n, 6])))
+    
+  }
+  colnames(newton_tmax_wide2)[colnames(newton_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  newton_spawn_tmax <- newton_tmax_wide2[, c(1,14)]
+  head(newton_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Newton Met Office weather station
+  newton_tmin2 <- newton[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  newton_tmin_wide2<- newton_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Newton Met Office weather station
+  for(n in 2:nrow(newton_tmin_wide2)) {
+    
+    newton_tmin_wide2[n,14] <- mean(c(as.numeric(newton_tmin_wide2[n, 2]), as.numeric(newton_tmin_wide2[n, 3]), as.numeric(newton_tmin_wide2[n, 4]), as.numeric(newton_tmin_wide2[n, 5]), as.numeric(newton_tmin_wide2[n, 6])))
+    
+  }
+  colnames(newton_tmin_wide2)[colnames(newton_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  newton_spawn_tmin <- newton_tmin_wide2[, c(1,14)]
+  head(newton_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Newton Met Office weather station
+  newton_af2 <- newton[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  newton_af_wide2<- newton_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Newton Met Office weather station
+  for(n in 2:nrow(newton_af_wide2)) {
+    
+    newton_af_wide2[n,14] <- mean(c(as.numeric(newton_af_wide2[n, 2]), as.numeric(newton_af_wide2[n, 3]), as.numeric(newton_af_wide2[n, 4]), as.numeric(newton_af_wide2[n, 5]), as.numeric(newton_af_wide2[n, 6])))
+    
+  }
+  colnames(newton_af_wide2)[colnames(newton_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  newton_spawn_af <- newton_af_wide2[, c(1,14)]
+  head(newton_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Newton Met Office weather station
+  newton_rain2 <- newton[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  newton_rain_wide2<- newton_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Newton Met Office weather station
+  for(n in 2:nrow(newton_rain_wide2)) {
+    
+    newton_rain_wide2[n,14] <- mean(c(as.numeric(newton_rain_wide2[n, 2]), as.numeric(newton_rain_wide2[n, 3]), as.numeric(newton_rain_wide2[n, 4]), as.numeric(newton_rain_wide2[n, 5]), as.numeric(newton_rain_wide2[n, 6])))
+    
+  }
+  colnames(newton_rain_wide2)[colnames(newton_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  newton_spawn_rain <- newton_rain_wide2[, c(1,14)]
+  head(newton_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Newton Met Office weather station
+  newton_sun2 <- newton[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  newton_sun_wide2<- newton_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Newton Met Office weather station
+  for(n in 2:nrow(newton_sun_wide2)) {
+    
+    newton_sun_wide2[n,14] <- mean(c(as.numeric(newton_sun_wide2[n, 2]), as.numeric(newton_sun_wide2[n, 3]), as.numeric(newton_sun_wide2[n, 4]), as.numeric(newton_sun_wide2[n, 5]), as.numeric(newton_sun_wide2[n, 6])))
+    
+  }
+  colnames(newton_sun_wide2)[colnames(newton_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  newton_spawn_sun <- newton_sun_wide2[, c(1,14)]
+  head(newton_spawn_sun)
+
+#Joining the Newton Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T04
+  t04_spawn_climate = merge(x=newton_spawn_tmax,y=newton_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t04_spawn_climate = merge(x=t04_spawn_climate,y=newton_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t04_spawn_climate = merge(x=t04_spawn_climate,y=newton_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t04_spawn_climate = merge(x=t04_spawn_climate,y=newton_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t04_spawn_climate$location = "T04"
+  t04_spawn_climate
+```
+
+### Climate when spawn is present at T05
+```{r T05 calculating average climate parameters from previous spring}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Chivenor Met Office weather station
+  chivenor_tmax2 <- chivenor[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  chivenor_tmax_wide2<- chivenor_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_tmax_wide2)) {
+    
+    chivenor_tmax_wide2[n,14] <- mean(c(as.numeric(chivenor_tmax_wide2[n, 2]), as.numeric(chivenor_tmax_wide2[n, 3]), as.numeric(chivenor_tmax_wide2[n, 4]), as.numeric(chivenor_tmax_wide2[n, 5]), as.numeric(chivenor_tmax_wide2[n, 6])))
+    
+  }
+  colnames(chivenor_tmax_wide2)[colnames(chivenor_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  chivenor_spawn_tmax <- chivenor_tmax_wide2[, c(1,14)]
+  head(chivenor_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Chivenor Met Office weather station
+  chivenor_tmin2 <- chivenor[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  chivenor_tmin_wide2<- chivenor_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_tmin_wide2)) {
+    
+    chivenor_tmin_wide2[n,14] <- mean(c(as.numeric(chivenor_tmin_wide2[n, 2]), as.numeric(chivenor_tmin_wide2[n, 3]), as.numeric(chivenor_tmin_wide2[n, 4]), as.numeric(chivenor_tmin_wide2[n, 5]), as.numeric(chivenor_tmin_wide2[n, 6])))
+    
+  }
+  colnames(chivenor_tmin_wide2)[colnames(chivenor_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  chivenor_spawn_tmin <- chivenor_tmin_wide2[, c(1,14)]
+  head(chivenor_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Chivenor Met Office weather station
+  chivenor_af2 <- chivenor[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  chivenor_af_wide2<- chivenor_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_af_wide2)) {
+    
+    chivenor_af_wide2[n,14] <- mean(c(as.numeric(chivenor_af_wide2[n, 2]), as.numeric(chivenor_af_wide2[n, 3]), as.numeric(chivenor_af_wide2[n, 4]), as.numeric(chivenor_af_wide2[n, 5]), as.numeric(chivenor_af_wide2[n, 6])))
+    
+  }
+  colnames(chivenor_af_wide2)[colnames(chivenor_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  chivenor_spawn_af <- chivenor_af_wide2[, c(1,14)]
+  head(chivenor_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Chivenor Met Office weather station
+  chivenor_rain2 <- chivenor[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  chivenor_rain_wide2<- chivenor_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_rain_wide2)) {
+    
+    chivenor_rain_wide2[n,14] <- mean(c(as.numeric(chivenor_rain_wide2[n, 2]), as.numeric(chivenor_rain_wide2[n, 3]), as.numeric(chivenor_rain_wide2[n, 4]), as.numeric(chivenor_rain_wide2[n, 5]), as.numeric(chivenor_rain_wide2[n, 6])))
+    
+  }
+  colnames(chivenor_rain_wide2)[colnames(chivenor_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  chivenor_spawn_rain <- chivenor_rain_wide2[, c(1,14)]
+  head(chivenor_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Chivenor Met Office weather station
+  chivenor_sun2 <- chivenor[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  chivenor_sun_wide2<- chivenor_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_sun_wide2)) {
+    
+    chivenor_sun_wide2[n,14] <- mean(c(as.numeric(chivenor_sun_wide2[n, 2]), as.numeric(chivenor_sun_wide2[n, 3]), as.numeric(chivenor_sun_wide2[n, 4]), as.numeric(chivenor_sun_wide2[n, 5]), as.numeric(chivenor_sun_wide2[n, 6])))
+    
+  }
+  colnames(chivenor_sun_wide2)[colnames(chivenor_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  chivenor_spawn_sun <- chivenor_sun_wide2[, c(1,14)]
+  head(chivenor_spawn_sun)
+
+#Joining the Chivenor Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T05
+  t05_spawn_climate = merge(x=chivenor_spawn_tmax,y=chivenor_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t05_spawn_climate = merge(x=t05_spawn_climate,y=chivenor_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t05_spawn_climate = merge(x=t05_spawn_climate,y=chivenor_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t05_spawn_climate = merge(x=t05_spawn_climate,y=chivenor_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t05_spawn_climate$location = "T05"
+  t05_spawn_climate
+```
+
+### Climate when spawn is present at T06 and T09
+```{r T06 and T09 calculating average climate parameters from previous spring}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Heathrow Met Office weather station
+  heathrow_tmax2 <- heathrow[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  heathrow_tmax_wide2<- heathrow_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_tmax_wide2)) {
+    
+    heathrow_tmax_wide2[n,14] <- mean(c(as.numeric(heathrow_tmax_wide2[n, 2]), as.numeric(heathrow_tmax_wide2[n, 3]), as.numeric(heathrow_tmax_wide2[n, 4]), as.numeric(heathrow_tmax_wide2[n, 5]), as.numeric(heathrow_tmax_wide2[n, 6])))
+    
+  }
+  colnames(heathrow_tmax_wide2)[colnames(heathrow_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  heathrow_spawn_tmax <- heathrow_tmax_wide2[, c(1,14)]
+  head(heathrow_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Heathrow Met Office weather station
+  heathrow_tmin2 <- heathrow[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  heathrow_tmin_wide2<- heathrow_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_tmin_wide2)) {
+    
+    heathrow_tmin_wide2[n,14] <- mean(c(as.numeric(heathrow_tmin_wide2[n, 2]), as.numeric(heathrow_tmin_wide2[n, 3]), as.numeric(heathrow_tmin_wide2[n, 4]), as.numeric(heathrow_tmin_wide2[n, 5]), as.numeric(heathrow_tmin_wide2[n, 6])))
+    
+  }
+  colnames(heathrow_tmin_wide2)[colnames(heathrow_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  heathrow_spawn_tmin <- heathrow_tmin_wide2[, c(1,14)]
+  head(heathrow_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Heathrow Met Office weather station
+  heathrow_af2 <- heathrow[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  heathrow_af_wide2<- heathrow_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_af_wide2)) {
+    
+    heathrow_af_wide2[n,14] <- mean(c(as.numeric(heathrow_af_wide2[n, 2]), as.numeric(heathrow_af_wide2[n, 3]), as.numeric(heathrow_af_wide2[n, 4]), as.numeric(heathrow_af_wide2[n, 5]), as.numeric(heathrow_af_wide2[n, 6])))
+    
+  }
+  colnames(heathrow_af_wide2)[colnames(heathrow_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  heathrow_spawn_af <- heathrow_af_wide2[, c(1,14)]
+  head(heathrow_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Heathrow Met Office weather station
+  heathrow_rain2 <- heathrow[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  heathrow_rain_wide2<- heathrow_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_rain_wide2)) {
+    
+    heathrow_rain_wide2[n,14] <- mean(c(as.numeric(heathrow_rain_wide2[n, 2]), as.numeric(heathrow_rain_wide2[n, 3]), as.numeric(heathrow_rain_wide2[n, 4]), as.numeric(heathrow_rain_wide2[n, 5]), as.numeric(heathrow_rain_wide2[n, 6])))
+    
+  }
+  colnames(heathrow_rain_wide2)[colnames(heathrow_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  heathrow_spawn_rain <- heathrow_rain_wide2[, c(1,14)]
+  head(heathrow_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Heathrow Met Office weather station
+  heathrow_sun2 <- heathrow[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  heathrow_sun_wide2<- heathrow_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_sun_wide2)) {
+    
+    heathrow_sun_wide2[n,14] <- mean(c(as.numeric(heathrow_sun_wide2[n, 2]), as.numeric(heathrow_sun_wide2[n, 3]), as.numeric(heathrow_sun_wide2[n, 4]), as.numeric(heathrow_sun_wide2[n, 5]), as.numeric(heathrow_sun_wide2[n, 6])))
+    
+  }
+  colnames(heathrow_sun_wide2)[colnames(heathrow_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  heathrow_spawn_sun <- heathrow_sun_wide2[, c(1,14)]
+  head(heathrow_spawn_sun)
+
+#Joining the Heathrow Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T06
+  t06_spawn_climate = merge(x=heathrow_spawn_tmax,y=heathrow_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t06_spawn_climate = merge(x=t06_spawn_climate,y=heathrow_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t06_spawn_climate = merge(x=t06_spawn_climate,y=heathrow_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t06_spawn_climate = merge(x=t06_spawn_climate,y=heathrow_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t06_spawn_climate$location = "T06"
+  t06_spawn_climate
+
+#Joining the Heathrow Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T09
+  t09_spawn_climate = merge(x=heathrow_spawn_tmax,y=heathrow_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t09_spawn_climate = merge(x=t09_spawn_climate,y=heathrow_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t09_spawn_climate = merge(x=t09_spawn_climate,y=heathrow_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t09_spawn_climate = merge(x=t09_spawn_climate,y=heathrow_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t09_spawn_climate$location = "T09"
+  t09_spawn_climate
+```
+
+### Climate when spawn is present at T10
+```{r T10 calculating average climate parameters from previous spring}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Southampton Met Office weather station
+  southampton_tmax2 <- southampton[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  southampton_tmax_wide2<- southampton_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_tmax_wide2)) {
+    
+    southampton_tmax_wide2[n,14] <- mean(c(as.numeric(southampton_tmax_wide2[n, 2]), as.numeric(southampton_tmax_wide2[n, 3]), as.numeric(southampton_tmax_wide2[n, 4]), as.numeric(southampton_tmax_wide2[n, 5]), as.numeric(southampton_tmax_wide2[n, 6])))
+    
+  }
+  colnames(southampton_tmax_wide2)[colnames(southampton_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  southampton_spawn_tmax <- southampton_tmax_wide2[, c(1,14)]
+  head(southampton_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Southampton Met Office weather station
+  southampton_tmin2 <- southampton[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  southampton_tmin_wide2<- southampton_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_tmin_wide2)) {
+    
+    southampton_tmin_wide2[n,14] <- mean(c(as.numeric(southampton_tmin_wide2[n, 2]), as.numeric(southampton_tmin_wide2[n, 3]), as.numeric(southampton_tmin_wide2[n, 4]), as.numeric(southampton_tmin_wide2[n, 5]), as.numeric(southampton_tmin_wide2[n, 6])))
+    
+  }
+  colnames(southampton_tmin_wide2)[colnames(southampton_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  southampton_spawn_tmin <- southampton_tmin_wide2[, c(1,14)]
+  head(southampton_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Southampton Met Office weather station
+  southampton_af2 <- southampton[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  southampton_af_wide2<- southampton_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_af_wide2)) {
+    
+    southampton_af_wide2[n,14] <- mean(c(as.numeric(southampton_af_wide2[n, 2]), as.numeric(southampton_af_wide2[n, 3]), as.numeric(southampton_af_wide2[n, 4]), as.numeric(southampton_af_wide2[n, 5]), as.numeric(southampton_af_wide2[n, 6])))
+    
+  }
+  colnames(southampton_af_wide2)[colnames(southampton_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  southampton_spawn_af <- southampton_af_wide2[, c(1,14)]
+  head(southampton_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Southampton Met Office weather station
+  southampton_rain2 <- southampton[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  southampton_rain_wide2<- southampton_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_rain_wide2)) {
+    
+    southampton_rain_wide2[n,14] <- mean(c(as.numeric(southampton_rain_wide2[n, 2]), as.numeric(southampton_rain_wide2[n, 3]), as.numeric(southampton_rain_wide2[n, 4]), as.numeric(southampton_rain_wide2[n, 5]), as.numeric(southampton_rain_wide2[n, 6])))
+    
+  }
+  colnames(southampton_rain_wide2)[colnames(southampton_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  southampton_spawn_rain <- southampton_rain_wide2[, c(1,14)]
+  head(southampton_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Southampton Met Office weather station
+  southampton_sun2 <- southampton[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  southampton_sun_wide2<- southampton_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_sun_wide2)) {
+    
+    southampton_sun_wide2[n,14] <- mean(c(as.numeric(southampton_sun_wide2[n, 2]), as.numeric(southampton_sun_wide2[n, 3]), as.numeric(southampton_sun_wide2[n, 4]), as.numeric(southampton_sun_wide2[n, 5]), as.numeric(southampton_sun_wide2[n, 6])))
+    
+  }
+  colnames(southampton_sun_wide2)[colnames(southampton_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  southampton_spawn_sun <- southampton_sun_wide2[, c(1,14)]
+  head(southampton_spawn_sun)
+
+#Joining the Heathrow Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T10
+  t10_spawn_climate = merge(x=southampton_spawn_tmax,y=southampton_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t10_spawn_climate = merge(x=t10_spawn_climate,y=southampton_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t10_spawn_climate = merge(x=t10_spawn_climate,y=southampton_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t10_spawn_climate = merge(x=t10_spawn_climate,y=southampton_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t10_spawn_climate$location = "T10"
+  t10_spawn_climate
+```
+
+### Climate when spawn is present at T11
+```{r T11 calculating average climate parameters from previous spring}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Valley Met Office weather station
+  valley_tmax2 <- valley[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  valley_tmax_wide2<- valley_tmax2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average spawn (Jan-May) daily maximum temperature at the Valley Met Office weather station
+  for(n in 2:nrow(valley_tmax_wide2)) {
+    
+    valley_tmax_wide2[n,14] <- mean(c(as.numeric(valley_tmax_wide2[n, 2]), as.numeric(valley_tmax_wide2[n, 3]), as.numeric(valley_tmax_wide2[n, 4]), as.numeric(valley_tmax_wide2[n, 5]), as.numeric(valley_tmax_wide2[n, 6])))
+    
+  }
+  colnames(valley_tmax_wide2)[colnames(valley_tmax_wide2) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average spawn daily maximum temperature
+  valley_spawn_tmax <- valley_tmax_wide2[, c(1,14)]
+  head(valley_spawn_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Valley Met Office weather station
+  valley_tmin2 <- valley[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  valley_tmin_wide2<- valley_tmin2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+
+#Calculating the average spawn (Jan-May) daily minimum temperature at the Valley Met Office weather station
+  for(n in 2:nrow(valley_tmin_wide2)) {
+    
+    valley_tmin_wide2[n,14] <- mean(c(as.numeric(valley_tmin_wide2[n, 2]), as.numeric(valley_tmin_wide2[n, 3]), as.numeric(valley_tmin_wide2[n, 4]), as.numeric(valley_tmin_wide2[n, 5]), as.numeric(valley_tmin_wide2[n, 6])))
+    
+  }
+  colnames(valley_tmin_wide2)[colnames(valley_tmin_wide2) == "...14"] <- "tmin"
+
+#Removing columns, leaving only the year and the average spawn daily minimum temperature
+  valley_spawn_tmin <- valley_tmin_wide2[, c(1,14)]
+  head(valley_spawn_tmin)
+
+#Creating a data frame with the monthly days with frost at the Valley Met Office weather station
+  valley_af2 <- valley[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format
+  valley_af_wide2<- valley_af2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+
+#Calculating the average spawn (Jan-May) monthly days with frost at the Valley Met Office weather station
+  for(n in 2:nrow(valley_af_wide2)) {
+    
+    valley_af_wide2[n,14] <- mean(c(as.numeric(valley_af_wide2[n, 2]), as.numeric(valley_af_wide2[n, 3]), as.numeric(valley_af_wide2[n, 4]), as.numeric(valley_af_wide2[n, 5]), as.numeric(valley_af_wide2[n, 6])))
+    
+  }
+  colnames(valley_af_wide2)[colnames(valley_af_wide2) == "...14"] <- "af"
+
+#Removing columns, leaving only the year and the average spawn monthly days with frost
+  valley_spawn_af <- valley_af_wide2[, c(1,14)]
+  head(valley_spawn_af)
+
+#Creating a data frame with the monthly total rainfall at the Valley Met Office weather station
+  valley_rain2 <- valley[, c(1,2,6)]
+
+#Pivoting the data frame to a wide format
+  valley_rain_wide2<- valley_rain2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+
+#Calculating the average spawn (Jan-May) monthly rainfall at the Valley Met Office weather station
+  for(n in 2:nrow(valley_rain_wide2)) {
+    
+    valley_rain_wide2[n,14] <- mean(c(as.numeric(valley_rain_wide2[n, 2]), as.numeric(valley_rain_wide2[n, 3]), as.numeric(valley_rain_wide2[n, 4]), as.numeric(valley_rain_wide2[n, 5]), as.numeric(valley_rain_wide2[n, 6])))
+    
+  }
+  colnames(valley_rain_wide2)[colnames(valley_rain_wide2) == "...14"] <- "rain"
+
+#Removing columns, leaving only the year and the average spawn monthly rainfall
+  valley_spawn_rain <- valley_rain_wide2[, c(1,14)]
+  head(valley_spawn_rain)
+
+#Creating a data frame with the monthly hours with sun at the Valley Met Office weather station
+  valley_sun2 <- valley[, c(1,2,7)]
+
+#Pivoting the data frame to a wide format
+  valley_sun_wide2<- valley_sun2 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+
+#Calculating the average spawn (Jan-May) monthly hours with sun at the Valley Met Office weather station
+  for(n in 2:nrow(valley_sun_wide2)) {
+    
+    valley_sun_wide2[n,14] <- mean(c(as.numeric(valley_sun_wide2[n, 2]), as.numeric(valley_sun_wide2[n, 3]), as.numeric(valley_sun_wide2[n, 4]), as.numeric(valley_sun_wide2[n, 5]), as.numeric(valley_sun_wide2[n, 6])))
+    
+  }
+  colnames(valley_sun_wide2)[colnames(valley_sun_wide2) == "...14"] <- "sun"
+
+#Removing columns, leaving only the year and the average spawn monthly hours with sun
+  valley_spawn_sun <- valley_sun_wide2[, c(1,14)]
+  head(valley_spawn_sun)
+
+#Joining the Valley Met Office station spawn climate data frames into a single data frame to use as an estimate of spawn climate for ECN location T11
+  t11_spawn_climate = merge(x=valley_spawn_tmax,y=valley_spawn_tmin,by=c("yyyy"),all.x=TRUE)
+  t11_spawn_climate = merge(x=t11_spawn_climate,y=valley_spawn_af,by=c("yyyy"),all.x=TRUE)
+  t11_spawn_climate = merge(x=t11_spawn_climate,y=valley_spawn_rain,by=c("yyyy"),all.x=TRUE)
+  t11_spawn_climate = merge(x=t11_spawn_climate,y=valley_spawn_sun,by=c("yyyy"),all.x=TRUE)
+  t11_spawn_climate$location = "T11"
+  t11_spawn_climate
+```
+
+### Assembling winter climate data for all ECN locations
+```{r joining spawn_climate for all locations}
+#Joining the winter climate data frames for all the ECN locations into a single data frame
+  spawn_climate <- rbind(t01_spawn_climate, t02_spawn_climate, t03_spawn_climate, t04_spawn_climate, t05_spawn_climate, t06_spawn_climate, t08_spawn_climate, t09_spawn_climate, t10_spawn_climate, t11_spawn_climate)
+  colnames(spawn_climate)[colnames(spawn_climate) == "yyyy"] <- "year"
+  head(spawn_climate)
+```
+
+### Climate when tadpoles are present at T01 and T08
+
+```{r time when tadpoles are present}
+#Identifying the months tadpoles were present for
+  min(pond_wide$hatch_yearday[is.na(pond_wide$hatch_yearday)==FALSE]) #yearday 32 = feb
+  max(pond_wide$leave_yearday[is.na(pond_wide$leave_yearday)==FALSE]) #yearday 251 = spet
+```
+
+
+```{r T01 and T08 calculating average climate parameters whilst tadpoles are present}
+
+#Creating a data frame with the monthly average of daily maximum temperatures at the Oxford Met Office weather station
+  oxford_tmax3 <- oxford[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  oxford_tmax_wide3<- oxford_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Oxford Met Office weather station
+  for(n in 2:nrow(oxford_tmax_wide3)) {
+    
+    oxford_tmax_wide3[n,14] <- mean(c(as.numeric(oxford_tmax_wide3[n, 3]), as.numeric(oxford_tmax_wide3[n, 4]), as.numeric(oxford_tmax_wide3[n, 5]), as.numeric(oxford_tmax_wide3[n, 6]), as.numeric(oxford_tmax_wide3[n, 7]), as.numeric(oxford_tmax_wide3[n, 8]), as.numeric(oxford_tmax_wide3[n, 9]), as.numeric(oxford_tmax_wide3[n, 10])))
+    
+  }
+  colnames(oxford_tmax_wide3)[colnames(oxford_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  oxford_tadpole_tmax <- oxford_tmax_wide3[, c(1,14)]
+  head(oxford_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Oxford Met Office weather station
+  oxford_tmin3 <- oxford[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  oxford_tmin_wide3<- oxford_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Oxford Met Office weather station  
+  for(n in 2:nrow(oxford_tmin_wide3)) {
+    
+    oxford_tmin_wide3[n,14] <- mean(c(as.numeric(oxford_tmin_wide3[n, 3]), as.numeric(oxford_tmin_wide3[n, 4]), as.numeric(oxford_tmin_wide3[n, 5]), as.numeric(oxford_tmin_wide3[n, 6]), as.numeric(oxford_tmin_wide3[n, 7]), as.numeric(oxford_tmin_wide3[n, 8]), as.numeric(oxford_tmin_wide3[n, 9]), as.numeric(oxford_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(oxford_tmin_wide3)[colnames(oxford_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  oxford_tadpole_tmin <- oxford_tmin_wide3[, c(1,14)]
+  head(oxford_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Oxford Met Office weather station
+  oxford_af3 <- oxford[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  oxford_af_wide3<- oxford_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Oxford Met Office weather station  
+  for(n in 2:nrow(oxford_af_wide3)) {
+    
+    oxford_af_wide3[n,14] <- mean(c(as.numeric(oxford_af_wide3[n, 3]), as.numeric(oxford_af_wide3[n, 4]), as.numeric(oxford_af_wide3[n, 5]), as.numeric(oxford_af_wide3[n, 6]), as.numeric(oxford_af_wide3[n, 7]), as.numeric(oxford_af_wide3[n, 8]), as.numeric(oxford_af_wide3[n, 9]), as.numeric(oxford_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(oxford_af_wide3)[colnames(oxford_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  oxford_tadpole_af <- oxford_af_wide3[, c(1,14)]
+  head(oxford_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Oxford Met Office weather station
+  oxford_rain3 <- oxford[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  oxford_rain_wide3<- oxford_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Oxford Met Office weather station  
+  for(n in 2:nrow(oxford_rain_wide3)) {
+    
+    oxford_rain_wide3[n,14] <- mean(c(as.numeric(oxford_rain_wide3[n, 3]), as.numeric(oxford_rain_wide3[n, 4]), as.numeric(oxford_rain_wide3[n, 5]), as.numeric(oxford_rain_wide3[n, 6]), as.numeric(oxford_rain_wide3[n, 7]), as.numeric(oxford_rain_wide3[n, 8]), as.numeric(oxford_rain_wide3[n, 9]), as.numeric(oxford_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(oxford_rain_wide3)[colnames(oxford_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  oxford_tadpole_rain <- oxford_rain_wide3[, c(1,14)]
+  head(oxford_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Oxford Met Office weather station
+  oxford_sun3 <- oxford[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  oxford_sun_wide3<- oxford_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Oxford Met Office weather station  
+  for(n in 2:nrow(oxford_sun_wide3)) {
+    
+    oxford_sun_wide3[n,14] <- mean(c(as.numeric(oxford_sun_wide3[n, 3]), as.numeric(oxford_sun_wide3[n, 4]), as.numeric(oxford_sun_wide3[n, 5]), as.numeric(oxford_sun_wide3[n, 6]), as.numeric(oxford_sun_wide3[n, 7]), as.numeric(oxford_sun_wide3[n, 8]), as.numeric(oxford_sun_wide3[n, 9]), as.numeric(oxford_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(oxford_sun_wide3)[colnames(oxford_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  oxford_tadpole_sun <- oxford_sun_wide3[, c(1,14)]
+  head(oxford_tadpole_sun)
+  
+#Joining the Oxford Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T01
+  t01_tadpole_climate = merge(x=oxford_tadpole_tmax,y=oxford_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t01_tadpole_climate = merge(x=t01_tadpole_climate,y=oxford_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t01_tadpole_climate = merge(x=t01_tadpole_climate,y=oxford_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t01_tadpole_climate = merge(x=t01_tadpole_climate,y=oxford_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t01_tadpole_climate$location = "T01"
+  t01_tadpole_climate
+
+#Joining the Oxford Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T08  
+  t08_tadpole_climate = merge(x=oxford_tadpole_tmax,y=oxford_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t08_tadpole_climate = merge(x=t08_tadpole_climate,y=oxford_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t08_tadpole_climate = merge(x=t08_tadpole_climate,y=oxford_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t08_tadpole_climate = merge(x=t08_tadpole_climate,y=oxford_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t08_tadpole_climate$location = "T08"
+  t08_tadpole_climate
+```
+
+### Climate when tadpoles are present at T02
+```{r T02 calculating average climate parameters from previous summer}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Braemer Met Office weather station
+  braemer_tmax3 <- braemer[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  braemer_tmax_wide3<- braemer_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Braemer Met Office weather station
+  for(n in 2:nrow(braemer_tmax_wide3)) {
+    
+    braemer_tmax_wide3[n,14] <- mean(c(as.numeric(braemer_tmax_wide3[n, 3]), as.numeric(braemer_tmax_wide3[n, 4]), as.numeric(braemer_tmax_wide3[n, 5]), as.numeric(braemer_tmax_wide3[n, 6]), as.numeric(braemer_tmax_wide3[n, 7]), as.numeric(braemer_tmax_wide3[n, 8]), as.numeric(braemer_tmax_wide3[n, 9]), as.numeric(braemer_tmax_wide3[n, 10])))
+    
+  }
+  colnames(braemer_tmax_wide3)[colnames(braemer_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  braemer_tadpole_tmax <- braemer_tmax_wide3[, c(1,14)]
+  head(braemer_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Braemer Met Office weather station
+  braemer_tmin3 <- braemer[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  braemer_tmin_wide3<- braemer_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Braemer Met Office weather station  
+  for(n in 2:nrow(braemer_tmin_wide3)) {
+    
+    braemer_tmin_wide3[n,14] <- mean(c(as.numeric(braemer_tmin_wide3[n, 3]), as.numeric(braemer_tmin_wide3[n, 4]), as.numeric(braemer_tmin_wide3[n, 5]), as.numeric(braemer_tmin_wide3[n, 6]), as.numeric(braemer_tmin_wide3[n, 7]), as.numeric(braemer_tmin_wide3[n, 8]), as.numeric(braemer_tmin_wide3[n, 9]), as.numeric(braemer_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(braemer_tmin_wide3)[colnames(braemer_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  braemer_tadpole_tmin <- braemer_tmin_wide3[, c(1,14)]
+  head(braemer_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Braemer Met Office weather station
+  braemer_af3 <- braemer[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  braemer_af_wide3<- braemer_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Braemer Met Office weather station  
+  for(n in 2:nrow(braemer_af_wide3)) {
+    
+    braemer_af_wide3[n,14] <- mean(c(as.numeric(braemer_af_wide3[n, 3]), as.numeric(braemer_af_wide3[n, 4]), as.numeric(braemer_af_wide3[n, 5]), as.numeric(braemer_af_wide3[n, 6]), as.numeric(braemer_af_wide3[n, 7]), as.numeric(braemer_af_wide3[n, 8]), as.numeric(braemer_af_wide3[n, 9]), as.numeric(braemer_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(braemer_af_wide3)[colnames(braemer_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  braemer_tadpole_af <- braemer_af_wide3[, c(1,14)]
+  head(braemer_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Braemer Met Office weather station
+  braemer_rain3 <- braemer[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  braemer_rain_wide3<- braemer_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Braemer Met Office weather station  
+  for(n in 2:nrow(braemer_rain_wide3)) {
+    
+    braemer_rain_wide3[n,14] <- mean(c(as.numeric(braemer_rain_wide3[n, 3]), as.numeric(braemer_rain_wide3[n, 4]), as.numeric(braemer_rain_wide3[n, 5]), as.numeric(braemer_rain_wide3[n, 6]), as.numeric(braemer_rain_wide3[n, 7]), as.numeric(braemer_rain_wide3[n, 8]), as.numeric(braemer_rain_wide3[n, 9]), as.numeric(braemer_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(braemer_rain_wide3)[colnames(braemer_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  braemer_tadpole_rain <- braemer_rain_wide3[, c(1,14)]
+  head(braemer_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Braemer Met Office weather station
+  braemer_sun3 <- braemer[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  braemer_sun_wide3<- braemer_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Braemer Met Office weather station  
+  for(n in 2:nrow(braemer_sun_wide3)) {
+    
+    braemer_sun_wide3[n,14] <- mean(c(as.numeric(braemer_sun_wide3[n, 3]), as.numeric(braemer_sun_wide3[n, 4]), as.numeric(braemer_sun_wide3[n, 5]), as.numeric(braemer_sun_wide3[n, 6]), as.numeric(braemer_sun_wide3[n, 7]), as.numeric(braemer_sun_wide3[n, 8]), as.numeric(braemer_sun_wide3[n, 9]), as.numeric(braemer_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(braemer_sun_wide3)[colnames(braemer_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  braemer_tadpole_sun <- braemer_sun_wide3[, c(1,14)]
+  head(braemer_tadpole_sun)
+  
+#Joining the Braemer Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T02
+  t02_tadpole_climate = merge(x=braemer_tadpole_tmax,y=braemer_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t02_tadpole_climate = merge(x=t02_tadpole_climate,y=braemer_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t02_tadpole_climate = merge(x=t02_tadpole_climate,y=braemer_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t02_tadpole_climate = merge(x=t02_tadpole_climate,y=braemer_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t02_tadpole_climate$location = "T02"
+  t02_tadpole_climate
+```
+
+### Climate when tadpoles are present at T03
+```{r T03 calculating average climate parameters from previous summer}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Armagh Met Office weather station
+  armagh_tmax3 <- armagh[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  armagh_tmax_wide3<- armagh_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Armagh Met Office weather station
+  for(n in 2:nrow(armagh_tmax_wide3)) {
+    
+    armagh_tmax_wide3[n,14] <- mean(c(as.numeric(armagh_tmax_wide3[n, 3]), as.numeric(armagh_tmax_wide3[n, 4]), as.numeric(armagh_tmax_wide3[n, 5]), as.numeric(armagh_tmax_wide3[n, 6]), as.numeric(armagh_tmax_wide3[n, 7]), as.numeric(armagh_tmax_wide3[n, 8]), as.numeric(armagh_tmax_wide3[n, 9]), as.numeric(armagh_tmax_wide3[n, 10])))
+    
+  }
+  colnames(armagh_tmax_wide3)[colnames(armagh_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  armagh_tadpole_tmax <- armagh_tmax_wide3[, c(1,14)]
+  head(armagh_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Armagh Met Office weather station
+  armagh_tmin3 <- armagh[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  armagh_tmin_wide3<- armagh_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Armagh Met Office weather station  
+  for(n in 2:nrow(armagh_tmin_wide3)) {
+    
+    armagh_tmin_wide3[n,14] <- mean(c(as.numeric(armagh_tmin_wide3[n, 3]), as.numeric(armagh_tmin_wide3[n, 4]), as.numeric(armagh_tmin_wide3[n, 5]), as.numeric(armagh_tmin_wide3[n, 6]), as.numeric(armagh_tmin_wide3[n, 7]), as.numeric(armagh_tmin_wide3[n, 8]), as.numeric(armagh_tmin_wide3[n, 9]), as.numeric(armagh_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(armagh_tmin_wide3)[colnames(armagh_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  armagh_tadpole_tmin <- armagh_tmin_wide3[, c(1,14)]
+  head(armagh_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Armagh Met Office weather station
+  armagh_af3 <- armagh[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  armagh_af_wide3<- armagh_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Armagh Met Office weather station  
+  for(n in 2:nrow(armagh_af_wide3)) {
+    
+    armagh_af_wide3[n,14] <- mean(c(as.numeric(armagh_af_wide3[n, 3]), as.numeric(armagh_af_wide3[n, 4]), as.numeric(armagh_af_wide3[n, 5]), as.numeric(armagh_af_wide3[n, 6]), as.numeric(armagh_af_wide3[n, 7]), as.numeric(armagh_af_wide3[n, 8]), as.numeric(armagh_af_wide3[n, 9]), as.numeric(armagh_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(armagh_af_wide3)[colnames(armagh_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  armagh_tadpole_af <- armagh_af_wide3[, c(1,14)]
+  head(armagh_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Armagh Met Office weather station
+  armagh_rain3 <- armagh[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  armagh_rain_wide3<- armagh_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Armagh Met Office weather station  
+  for(n in 2:nrow(armagh_rain_wide3)) {
+    
+    armagh_rain_wide3[n,14] <- mean(c(as.numeric(armagh_rain_wide3[n, 3]), as.numeric(armagh_rain_wide3[n, 4]), as.numeric(armagh_rain_wide3[n, 5]), as.numeric(armagh_rain_wide3[n, 6]), as.numeric(armagh_rain_wide3[n, 7]), as.numeric(armagh_rain_wide3[n, 8]), as.numeric(armagh_rain_wide3[n, 9]), as.numeric(armagh_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(armagh_rain_wide3)[colnames(armagh_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  armagh_tadpole_rain <- armagh_rain_wide3[, c(1,14)]
+  head(armagh_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Armagh Met Office weather station
+  armagh_sun3 <- armagh[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  armagh_sun_wide3<- armagh_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Armagh Met Office weather station  
+  for(n in 2:nrow(armagh_sun_wide3)) {
+    
+    armagh_sun_wide3[n,14] <- mean(c(as.numeric(armagh_sun_wide3[n, 3]), as.numeric(armagh_sun_wide3[n, 4]), as.numeric(armagh_sun_wide3[n, 5]), as.numeric(armagh_sun_wide3[n, 6]), as.numeric(armagh_sun_wide3[n, 7]), as.numeric(armagh_sun_wide3[n, 8]), as.numeric(armagh_sun_wide3[n, 9]), as.numeric(armagh_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(armagh_sun_wide3)[colnames(armagh_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  armagh_tadpole_sun <- armagh_sun_wide3[, c(1,14)]
+  head(armagh_tadpole_sun)
+  
+#Joining the Armagh Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T03
+
+  t03_tadpole_climate = merge(x=armagh_tadpole_tmax,y=armagh_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t03_tadpole_climate = merge(x=t03_tadpole_climate,y=armagh_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t03_tadpole_climate = merge(x=t03_tadpole_climate,y=armagh_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t03_tadpole_climate = merge(x=t03_tadpole_climate,y=armagh_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t03_tadpole_climate$location = "T03"
+  t03_tadpole_climate
+```
+
+### Climate when tadpoles are present at T04
+```{r T04 calculating average climate parameters from previous summer}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Newton Met Office weather station
+  newton_tmax3 <- newton[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  newton_tmax_wide3<- newton_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Newton Met Office weather station
+  for(n in 2:nrow(newton_tmax_wide3)) {
+    
+    newton_tmax_wide3[n,14] <- mean(c(as.numeric(newton_tmax_wide3[n, 3]), as.numeric(newton_tmax_wide3[n, 4]), as.numeric(newton_tmax_wide3[n, 5]), as.numeric(newton_tmax_wide3[n, 6]), as.numeric(newton_tmax_wide3[n, 7]), as.numeric(newton_tmax_wide3[n, 8]), as.numeric(newton_tmax_wide3[n, 9]), as.numeric(newton_tmax_wide3[n, 10])))
+    
+  }
+  colnames(newton_tmax_wide3)[colnames(newton_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  newton_tadpole_tmax <- newton_tmax_wide3[, c(1,14)]
+  head(newton_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Newton Met Office weather station
+  newton_tmin3 <- newton[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  newton_tmin_wide3<- newton_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Newton Met Office weather station  
+  for(n in 2:nrow(newton_tmin_wide3)) {
+    
+    newton_tmin_wide3[n,14] <- mean(c(as.numeric(newton_tmin_wide3[n, 3]), as.numeric(newton_tmin_wide3[n, 4]), as.numeric(newton_tmin_wide3[n, 5]), as.numeric(newton_tmin_wide3[n, 6]), as.numeric(newton_tmin_wide3[n, 7]), as.numeric(newton_tmin_wide3[n, 8]), as.numeric(newton_tmin_wide3[n, 9]), as.numeric(newton_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(newton_tmin_wide3)[colnames(newton_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  newton_tadpole_tmin <- newton_tmin_wide3[, c(1,14)]
+  head(newton_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Newton Met Office weather station
+  newton_af3 <- newton[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  newton_af_wide3<- newton_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Newton Met Office weather station  
+  for(n in 2:nrow(newton_af_wide3)) {
+    
+    newton_af_wide3[n,14] <- mean(c(as.numeric(newton_af_wide3[n, 3]), as.numeric(newton_af_wide3[n, 4]), as.numeric(newton_af_wide3[n, 5]), as.numeric(newton_af_wide3[n, 6]), as.numeric(newton_af_wide3[n, 7]), as.numeric(newton_af_wide3[n, 8]), as.numeric(newton_af_wide3[n, 9]), as.numeric(newton_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(newton_af_wide3)[colnames(newton_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  newton_tadpole_af <- newton_af_wide3[, c(1,14)]
+  head(newton_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Newton Met Office weather station
+  newton_rain3 <- newton[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  newton_rain_wide3<- newton_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Newton Met Office weather station  
+  for(n in 2:nrow(newton_rain_wide3)) {
+    
+    newton_rain_wide3[n,14] <- mean(c(as.numeric(newton_rain_wide3[n, 3]), as.numeric(newton_rain_wide3[n, 4]), as.numeric(newton_rain_wide3[n, 5]), as.numeric(newton_rain_wide3[n, 6]), as.numeric(newton_rain_wide3[n, 7]), as.numeric(newton_rain_wide3[n, 8]), as.numeric(newton_rain_wide3[n, 9]), as.numeric(newton_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(newton_rain_wide3)[colnames(newton_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  newton_tadpole_rain <- newton_rain_wide3[, c(1,14)]
+  head(newton_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Newton Met Office weather station
+  newton_sun3 <- newton[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  newton_sun_wide3<- newton_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Newton Met Office weather station  
+  for(n in 2:nrow(newton_sun_wide3)) {
+    
+    newton_sun_wide3[n,14] <- mean(c(as.numeric(newton_sun_wide3[n, 3]), as.numeric(newton_sun_wide3[n, 4]), as.numeric(newton_sun_wide3[n, 5]), as.numeric(newton_sun_wide3[n, 6]), as.numeric(newton_sun_wide3[n, 7]), as.numeric(newton_sun_wide3[n, 8]), as.numeric(newton_sun_wide3[n, 9]), as.numeric(newton_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(newton_sun_wide3)[colnames(newton_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  newton_tadpole_sun <- newton_sun_wide3[, c(1,14)]
+  head(newton_tadpole_sun)
+  
+#Joining the Newton Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T04
+
+  t04_tadpole_climate = merge(x=newton_tadpole_tmax,y=newton_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t04_tadpole_climate = merge(x=t04_tadpole_climate,y=newton_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t04_tadpole_climate = merge(x=t04_tadpole_climate,y=newton_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t04_tadpole_climate = merge(x=t04_tadpole_climate,y=newton_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t04_tadpole_climate$location = "T04"
+  t04_tadpole_climate
+```
+
+### Climate when tadpoles are present at T05
+```{r T05 calculating average climate parameters from previous summer}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Chivenor Met Office weather station
+  chivenor_tmax3 <- chivenor[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  chivenor_tmax_wide3<- chivenor_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Chivenor Met Office weather station
+  for(n in 2:nrow(chivenor_tmax_wide3)) {
+    
+    chivenor_tmax_wide3[n,14] <- mean(c(as.numeric(chivenor_tmax_wide3[n, 3]), as.numeric(chivenor_tmax_wide3[n, 4]), as.numeric(chivenor_tmax_wide3[n, 5]), as.numeric(chivenor_tmax_wide3[n, 6]), as.numeric(chivenor_tmax_wide3[n, 7]), as.numeric(chivenor_tmax_wide3[n, 8]), as.numeric(chivenor_tmax_wide3[n, 9]), as.numeric(chivenor_tmax_wide3[n, 10])))
+    
+  }
+  colnames(chivenor_tmax_wide3)[colnames(chivenor_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  chivenor_tadpole_tmax <- chivenor_tmax_wide3[, c(1,14)]
+  head(chivenor_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Chivenor Met Office weather station
+  chivenor_tmin3 <- chivenor[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  chivenor_tmin_wide3<- chivenor_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Chivenor Met Office weather station  
+  for(n in 2:nrow(chivenor_tmin_wide3)) {
+    
+    chivenor_tmin_wide3[n,14] <- mean(c(as.numeric(chivenor_tmin_wide3[n, 3]), as.numeric(chivenor_tmin_wide3[n, 4]), as.numeric(chivenor_tmin_wide3[n, 5]), as.numeric(chivenor_tmin_wide3[n, 6]), as.numeric(chivenor_tmin_wide3[n, 7]), as.numeric(chivenor_tmin_wide3[n, 8]), as.numeric(chivenor_tmin_wide3[n, 9]), as.numeric(chivenor_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(chivenor_tmin_wide3)[colnames(chivenor_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  chivenor_tadpole_tmin <- chivenor_tmin_wide3[, c(1,14)]
+  head(chivenor_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Chivenor Met Office weather station
+  chivenor_af3 <- chivenor[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  chivenor_af_wide3<- chivenor_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Chivenor Met Office weather station  
+  for(n in 2:nrow(chivenor_af_wide3)) {
+    
+    chivenor_af_wide3[n,14] <- mean(c(as.numeric(chivenor_af_wide3[n, 3]), as.numeric(chivenor_af_wide3[n, 4]), as.numeric(chivenor_af_wide3[n, 5]), as.numeric(chivenor_af_wide3[n, 6]), as.numeric(chivenor_af_wide3[n, 7]), as.numeric(chivenor_af_wide3[n, 8]), as.numeric(chivenor_af_wide3[n, 9]), as.numeric(chivenor_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(chivenor_af_wide3)[colnames(chivenor_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  chivenor_tadpole_af <- chivenor_af_wide3[, c(1,14)]
+  head(chivenor_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Chivenor Met Office weather station
+  chivenor_rain3 <- chivenor[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  chivenor_rain_wide3<- chivenor_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Chivenor Met Office weather station  
+  for(n in 2:nrow(chivenor_rain_wide3)) {
+    
+    chivenor_rain_wide3[n,14] <- mean(c(as.numeric(chivenor_rain_wide3[n, 3]), as.numeric(chivenor_rain_wide3[n, 4]), as.numeric(chivenor_rain_wide3[n, 5]), as.numeric(chivenor_rain_wide3[n, 6]), as.numeric(chivenor_rain_wide3[n, 7]), as.numeric(chivenor_rain_wide3[n, 8]), as.numeric(chivenor_rain_wide3[n, 9]), as.numeric(chivenor_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(chivenor_rain_wide3)[colnames(chivenor_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  chivenor_tadpole_rain <- chivenor_rain_wide3[, c(1,14)]
+  head(chivenor_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Chivenor Met Office weather station
+  chivenor_sun3 <- chivenor[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  chivenor_sun_wide3<- chivenor_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Chivenor Met Office weather station  
+  for(n in 2:nrow(chivenor_sun_wide3)) {
+    
+    chivenor_sun_wide3[n,14] <- mean(c(as.numeric(chivenor_sun_wide3[n, 3]), as.numeric(chivenor_sun_wide3[n, 4]), as.numeric(chivenor_sun_wide3[n, 5]), as.numeric(chivenor_sun_wide3[n, 6]), as.numeric(chivenor_sun_wide3[n, 7]), as.numeric(chivenor_sun_wide3[n, 8]), as.numeric(chivenor_sun_wide3[n, 9]), as.numeric(chivenor_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(chivenor_sun_wide3)[colnames(chivenor_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  chivenor_tadpole_sun <- chivenor_sun_wide3[, c(1,14)]
+  head(chivenor_tadpole_sun)
+  
+#Joining the Chivenor Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T05
+  t05_tadpole_climate = merge(x=chivenor_tadpole_tmax,y=chivenor_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t05_tadpole_climate = merge(x=t05_tadpole_climate,y=chivenor_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t05_tadpole_climate = merge(x=t05_tadpole_climate,y=chivenor_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t05_tadpole_climate = merge(x=t05_tadpole_climate,y=chivenor_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t05_tadpole_climate$location = "T05"
+  t05_tadpole_climate
+```
+
+### Climate when tadpoles are present at T06 and T09
+```{r T06 and T09 calculating average climate parameters from previous summer}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Heathrow Met Office weather station
+  heathrow_tmax3 <- heathrow[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  #Creating a data frame with the monthly average of daily maximum temperatures at the Heathrow Met Office weather station
+  heathrow_tmax3 <- heathrow[, c(1:3)]
+ 
+#Pivoting the data frame to a wide format 
+  heathrow_tmax_wide3<- heathrow_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Heathrow Met Office weather station
+  for(n in 2:nrow(heathrow_tmax_wide3)) {
+    
+    heathrow_tmax_wide3[n,14] <- mean(c(as.numeric(heathrow_tmax_wide3[n, 3]), as.numeric(heathrow_tmax_wide3[n, 4]), as.numeric(heathrow_tmax_wide3[n, 5]), as.numeric(heathrow_tmax_wide3[n, 6]), as.numeric(heathrow_tmax_wide3[n, 7]), as.numeric(heathrow_tmax_wide3[n, 8]), as.numeric(heathrow_tmax_wide3[n, 9]), as.numeric(heathrow_tmax_wide3[n, 10])))
+    
+  }
+  colnames(heathrow_tmax_wide3)[colnames(heathrow_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  heathrow_tadpole_tmax <- heathrow_tmax_wide3[, c(1,14)]
+  head(heathrow_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Heathrow Met Office weather station
+  heathrow_tmin3 <- heathrow[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  heathrow_tmin_wide3<- heathrow_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Heathrow Met Office weather station  
+  for(n in 2:nrow(heathrow_tmin_wide3)) {
+    
+    heathrow_tmin_wide3[n,14] <- mean(c(as.numeric(heathrow_tmin_wide3[n, 3]), as.numeric(heathrow_tmin_wide3[n, 4]), as.numeric(heathrow_tmin_wide3[n, 5]), as.numeric(heathrow_tmin_wide3[n, 6]), as.numeric(heathrow_tmin_wide3[n, 7]), as.numeric(heathrow_tmin_wide3[n, 8]), as.numeric(heathrow_tmin_wide3[n, 9]), as.numeric(heathrow_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(heathrow_tmin_wide3)[colnames(heathrow_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  heathrow_tadpole_tmin <- heathrow_tmin_wide3[, c(1,14)]
+  head(heathrow_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Heathrow Met Office weather station
+  heathrow_af3 <- heathrow[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  heathrow_af_wide3<- heathrow_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Heathrow Met Office weather station  
+  for(n in 2:nrow(heathrow_af_wide3)) {
+    
+    heathrow_af_wide3[n,14] <- mean(c(as.numeric(heathrow_af_wide3[n, 3]), as.numeric(heathrow_af_wide3[n, 4]), as.numeric(heathrow_af_wide3[n, 5]), as.numeric(heathrow_af_wide3[n, 6]), as.numeric(heathrow_af_wide3[n, 7]), as.numeric(heathrow_af_wide3[n, 8]), as.numeric(heathrow_af_wide3[n, 9]), as.numeric(heathrow_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(heathrow_af_wide3)[colnames(heathrow_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  heathrow_tadpole_af <- heathrow_af_wide3[, c(1,14)]
+  head(heathrow_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Heathrow Met Office weather station
+  heathrow_rain3 <- heathrow[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  heathrow_rain_wide3<- heathrow_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Heathrow Met Office weather station  
+  for(n in 2:nrow(heathrow_rain_wide3)) {
+    
+    heathrow_rain_wide3[n,14] <- mean(c(as.numeric(heathrow_rain_wide3[n, 3]), as.numeric(heathrow_rain_wide3[n, 4]), as.numeric(heathrow_rain_wide3[n, 5]), as.numeric(heathrow_rain_wide3[n, 6]), as.numeric(heathrow_rain_wide3[n, 7]), as.numeric(heathrow_rain_wide3[n, 8]), as.numeric(heathrow_rain_wide3[n, 9]), as.numeric(heathrow_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(heathrow_rain_wide3)[colnames(heathrow_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  heathrow_tadpole_rain <- heathrow_rain_wide3[, c(1,14)]
+  head(heathrow_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Heathrow Met Office weather station
+  heathrow_sun3 <- heathrow[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  heathrow_sun_wide3<- heathrow_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Heathrow Met Office weather station  
+  for(n in 2:nrow(heathrow_sun_wide3)) {
+    
+    heathrow_sun_wide3[n,14] <- mean(c(as.numeric(heathrow_sun_wide3[n, 3]), as.numeric(heathrow_sun_wide3[n, 4]), as.numeric(heathrow_sun_wide3[n, 5]), as.numeric(heathrow_sun_wide3[n, 6]), as.numeric(heathrow_sun_wide3[n, 7]), as.numeric(heathrow_sun_wide3[n, 8]), as.numeric(heathrow_sun_wide3[n, 9]), as.numeric(heathrow_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(heathrow_sun_wide3)[colnames(heathrow_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  heathrow_tadpole_sun <- heathrow_sun_wide3[, c(1,14)]
+  head(heathrow_tadpole_sun)
+  
+#Joining the Heathrow Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T06
+  t06_tadpole_climate = merge(x=heathrow_tadpole_tmax,y=heathrow_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t06_tadpole_climate = merge(x=t06_tadpole_climate,y=heathrow_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t06_tadpole_climate = merge(x=t06_tadpole_climate,y=heathrow_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t06_tadpole_climate = merge(x=t06_tadpole_climate,y=heathrow_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t06_tadpole_climate$location = "T06"
+  t06_tadpole_climate
+  
+#Joining the Heathrow Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T09
+  t09_tadpole_climate = merge(x=heathrow_tadpole_tmax,y=heathrow_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t09_tadpole_climate = merge(x=t09_tadpole_climate,y=heathrow_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t09_tadpole_climate = merge(x=t09_tadpole_climate,y=heathrow_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t09_tadpole_climate = merge(x=t09_tadpole_climate,y=heathrow_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t09_tadpole_climate$location = "T09"
+  t09_tadpole_climate
+```
+
+### Climate when tadpoles are present at T10
+```{r T10 calculating average climate parameters from previous summer}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Southampton Met Office weather station
+  southampton_tmax3 <- southampton[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  southampton_tmax_wide3<- southampton_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Southampton Met Office weather station
+  for(n in 2:nrow(southampton_tmax_wide3)) {
+    
+    southampton_tmax_wide3[n,14] <- mean(c(as.numeric(southampton_tmax_wide3[n, 3]), as.numeric(southampton_tmax_wide3[n, 4]), as.numeric(southampton_tmax_wide3[n, 5]), as.numeric(southampton_tmax_wide3[n, 6]), as.numeric(southampton_tmax_wide3[n, 7]), as.numeric(southampton_tmax_wide3[n, 8]), as.numeric(southampton_tmax_wide3[n, 9]), as.numeric(southampton_tmax_wide3[n, 10])))
+    
+  }
+  colnames(southampton_tmax_wide3)[colnames(southampton_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  southampton_tadpole_tmax <- southampton_tmax_wide3[, c(1,14)]
+  head(southampton_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Southampton Met Office weather station
+  southampton_tmin3 <- southampton[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  southampton_tmin_wide3<- southampton_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Southampton Met Office weather station  
+  for(n in 2:nrow(southampton_tmin_wide3)) {
+    
+    southampton_tmin_wide3[n,14] <- mean(c(as.numeric(southampton_tmin_wide3[n, 3]), as.numeric(southampton_tmin_wide3[n, 4]), as.numeric(southampton_tmin_wide3[n, 5]), as.numeric(southampton_tmin_wide3[n, 6]), as.numeric(southampton_tmin_wide3[n, 7]), as.numeric(southampton_tmin_wide3[n, 8]), as.numeric(southampton_tmin_wide3[n, 9]), as.numeric(southampton_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(southampton_tmin_wide3)[colnames(southampton_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  southampton_tadpole_tmin <- southampton_tmin_wide3[, c(1,14)]
+  head(southampton_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Southampton Met Office weather station
+  southampton_af3 <- southampton[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  southampton_af_wide3<- southampton_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Southampton Met Office weather station  
+  for(n in 2:nrow(southampton_af_wide3)) {
+    
+    southampton_af_wide3[n,14] <- mean(c(as.numeric(southampton_af_wide3[n, 3]), as.numeric(southampton_af_wide3[n, 4]), as.numeric(southampton_af_wide3[n, 5]), as.numeric(southampton_af_wide3[n, 6]), as.numeric(southampton_af_wide3[n, 7]), as.numeric(southampton_af_wide3[n, 8]), as.numeric(southampton_af_wide3[n, 9]), as.numeric(southampton_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(southampton_af_wide3)[colnames(southampton_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  southampton_tadpole_af <- southampton_af_wide3[, c(1,14)]
+  head(southampton_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Southampton Met Office weather station
+  southampton_rain3 <- southampton[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  southampton_rain_wide3<- southampton_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Southampton Met Office weather station  
+  for(n in 2:nrow(southampton_rain_wide3)) {
+    
+    southampton_rain_wide3[n,14] <- mean(c(as.numeric(southampton_rain_wide3[n, 3]), as.numeric(southampton_rain_wide3[n, 4]), as.numeric(southampton_rain_wide3[n, 5]), as.numeric(southampton_rain_wide3[n, 6]), as.numeric(southampton_rain_wide3[n, 7]), as.numeric(southampton_rain_wide3[n, 8]), as.numeric(southampton_rain_wide3[n, 9]), as.numeric(southampton_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(southampton_rain_wide3)[colnames(southampton_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  southampton_tadpole_rain <- southampton_rain_wide3[, c(1,14)]
+  head(southampton_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Southampton Met Office weather station
+  southampton_sun3 <- southampton[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  southampton_sun_wide3<- southampton_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Southampton Met Office weather station  
+  for(n in 2:nrow(southampton_sun_wide3)) {
+    
+    southampton_sun_wide3[n,14] <- mean(c(as.numeric(southampton_sun_wide3[n, 3]), as.numeric(southampton_sun_wide3[n, 4]), as.numeric(southampton_sun_wide3[n, 5]), as.numeric(southampton_sun_wide3[n, 6]), as.numeric(southampton_sun_wide3[n, 7]), as.numeric(southampton_sun_wide3[n, 8]), as.numeric(southampton_sun_wide3[n, 9]), as.numeric(southampton_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(southampton_sun_wide3)[colnames(southampton_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  southampton_tadpole_sun <- southampton_sun_wide3[, c(1,14)]
+  head(southampton_tadpole_sun)
+  
+#Joining the Southampton Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T10
+  t10_tadpole_climate = merge(x=southampton_tadpole_tmax,y=southampton_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t10_tadpole_climate = merge(x=t10_tadpole_climate,y=southampton_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t10_tadpole_climate = merge(x=t10_tadpole_climate,y=southampton_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t10_tadpole_climate = merge(x=t10_tadpole_climate,y=southampton_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t10_tadpole_climate$location = "T10"
+  t10_tadpole_climate
+```
+
+### Climate when tadpoles are present at T11
+```{r T11 calculating average climate parameters from previous summer}
+#Creating a data frame with the monthly average of daily maximum temperatures at the Valley Met Office weather station
+  valley_tmax3 <- valley[, c(1:3)]
+
+#Pivoting the data frame to a wide format
+  valley_tmax_wide3<- valley_tmax3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmax)
+
+#Calculating the average tadpole (Jan-May) daily maximum temperature at the Valley Met Office weather station
+  for(n in 2:nrow(valley_tmax_wide3)) {
+    
+    valley_tmax_wide3[n,14] <- mean(c(as.numeric(valley_tmax_wide3[n, 3]), as.numeric(valley_tmax_wide3[n, 4]), as.numeric(valley_tmax_wide3[n, 5]), as.numeric(valley_tmax_wide3[n, 6]), as.numeric(valley_tmax_wide3[n, 7]), as.numeric(valley_tmax_wide3[n, 8]), as.numeric(valley_tmax_wide3[n, 9]), as.numeric(valley_tmax_wide3[n, 10])))
+    
+  }
+  colnames(valley_tmax_wide3)[colnames(valley_tmax_wide3) == "...14"] <- "tmax"
+
+#Removing columns, leaving only the year and the average tadpole daily maximum temperature
+  valley_tadpole_tmax <- valley_tmax_wide3[, c(1,14)]
+  head(valley_tadpole_tmax)
+
+#Creating a data frame with the monthly average of daily minimum temperatures at the Valley Met Office weather station
+  valley_tmin3 <- valley[, c(1,2,4)]
+
+#Pivoting the data frame to a wide format
+  valley_tmin_wide3<- valley_tmin3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = tmin)
+  
+#Calculating the average tadpole (Jan-May) daily minimum temperature at the Valley Met Office weather station  
+  for(n in 2:nrow(valley_tmin_wide3)) {
+    
+    valley_tmin_wide3[n,14] <- mean(c(as.numeric(valley_tmin_wide3[n, 3]), as.numeric(valley_tmin_wide3[n, 4]), as.numeric(valley_tmin_wide3[n, 5]), as.numeric(valley_tmin_wide3[n, 6]), as.numeric(valley_tmin_wide3[n, 7]), as.numeric(valley_tmin_wide3[n, 8]), as.numeric(valley_tmin_wide3[n, 9]), as.numeric(valley_tmin_wide3[n, 10])))
+    
+    
+  }
+  colnames(valley_tmin_wide3)[colnames(valley_tmin_wide3) == "...14"] <- "tmin"
+  
+#Removing columns, leaving only the year and the average tadpole daily minimum temperature 
+  valley_tadpole_tmin <- valley_tmin_wide3[, c(1,14)]
+  head(valley_tadpole_tmin)
+
+#Creating a data frame with the monthly days with frost at the Valley Met Office weather station
+  valley_af3 <- valley[, c(1,2,5)]
+
+#Pivoting the data frame to a wide format  
+  valley_af_wide3<- valley_af3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = af)
+  
+#Calculating the average tadpole (Jan-May) monthly days with frost at the Valley Met Office weather station  
+  for(n in 2:nrow(valley_af_wide3)) {
+    
+    valley_af_wide3[n,14] <- mean(c(as.numeric(valley_af_wide3[n, 3]), as.numeric(valley_af_wide3[n, 4]), as.numeric(valley_af_wide3[n, 5]), as.numeric(valley_af_wide3[n, 6]), as.numeric(valley_af_wide3[n, 7]), as.numeric(valley_af_wide3[n, 8]), as.numeric(valley_af_wide3[n, 9]), as.numeric(valley_af_wide3[n, 10])))
+    
+    
+  }
+  colnames(valley_af_wide3)[colnames(valley_af_wide3) == "...14"] <- "af"
+  
+#Removing columns, leaving only the year and the average tadpole monthly days with frost
+  valley_tadpole_af <- valley_af_wide3[, c(1,14)]
+  head(valley_tadpole_af)
+
+#Creating a data frame with the monthly total rainfall at the Valley Met Office weather station
+  valley_rain3 <- valley[, c(1,2,6)]
+  
+#Pivoting the data frame to a wide format 
+  valley_rain_wide3<- valley_rain3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = rain)
+  
+#Calculating the average tadpole (Jan-May) monthly rainfall at the Valley Met Office weather station  
+  for(n in 2:nrow(valley_rain_wide3)) {
+    
+    valley_rain_wide3[n,14] <- mean(c(as.numeric(valley_rain_wide3[n, 3]), as.numeric(valley_rain_wide3[n, 4]), as.numeric(valley_rain_wide3[n, 5]), as.numeric(valley_rain_wide3[n, 6]), as.numeric(valley_rain_wide3[n, 7]), as.numeric(valley_rain_wide3[n, 8]), as.numeric(valley_rain_wide3[n, 9]), as.numeric(valley_rain_wide3[n, 10])))
+    
+    
+  }
+  colnames(valley_rain_wide3)[colnames(valley_rain_wide3) == "...14"] <- "rain"
+  
+#Removing columns, leaving only the year and the average tadpole monthly rainfall  
+  valley_tadpole_rain <- valley_rain_wide3[, c(1,14)]
+  head(valley_tadpole_rain)
+
+#Creating a data frame with the monthly hours with sun at the Valley Met Office weather station
+  valley_sun3 <- valley[, c(1,2,7)]
+  
+#Pivoting the data frame to a wide format
+  valley_sun_wide3<- valley_sun3 %>% pivot_wider(.,id_cols=c(yyyy),names_from = c(mm),values_from = sun)
+  
+#Calculating the average tadpole (Jan-May) monthly hours with sun at the Valley Met Office weather station  
+  for(n in 2:nrow(valley_sun_wide3)) {
+    
+    valley_sun_wide3[n,14] <- mean(c(as.numeric(valley_sun_wide3[n, 3]), as.numeric(valley_sun_wide3[n, 4]), as.numeric(valley_sun_wide3[n, 5]), as.numeric(valley_sun_wide3[n, 6]), as.numeric(valley_sun_wide3[n, 7]), as.numeric(valley_sun_wide3[n, 8]), as.numeric(valley_sun_wide3[n, 9]), as.numeric(valley_sun_wide3[n, 10])))
+    
+    
+  }
+  colnames(valley_sun_wide3)[colnames(valley_sun_wide3) == "...14"] <- "sun"
+  
+#Removing columns, leaving only the year and the average tadpole monthly hours with sun
+  valley_tadpole_sun <- valley_sun_wide3[, c(1,14)]
+  head(valley_tadpole_sun)
+  
+#Joining the Valley Met Office station tadpole climate data frames into a single data frame to use as an estimate of tadpole climate for ECN location T11
+
+  t11_tadpole_climate = merge(x=valley_tadpole_tmax,y=valley_tadpole_tmin,by=c("yyyy"),all.x=TRUE)
+  t11_tadpole_climate = merge(x=t11_tadpole_climate,y=valley_tadpole_af,by=c("yyyy"),all.x=TRUE)
+  t11_tadpole_climate = merge(x=t11_tadpole_climate,y=valley_tadpole_rain,by=c("yyyy"),all.x=TRUE)
+  t11_tadpole_climate = merge(x=t11_tadpole_climate,y=valley_tadpole_sun,by=c("yyyy"),all.x=TRUE)
+  t11_tadpole_climate$location = "T11"
+  t11_tadpole_climate
+```
+
+### Assembling winter climate data for all ECN locations
+```{r joining tadpole_climate for all locations}
+#Joining the winter climate data frames for all the ECN locations into a single data frame
+  tadpole_climate <- rbind(t01_tadpole_climate, t02_tadpole_climate, t03_tadpole_climate, t04_tadpole_climate, t05_tadpole_climate, t06_tadpole_climate, t08_tadpole_climate, t09_tadpole_climate, t10_tadpole_climate, t11_tadpole_climate)
+  colnames(tadpole_climate)[colnames(tadpole_climate) == "yyyy"] <- "year"
+  head(tadpole_climate)
+```
+
+# Final Data
+
+```{r creating numerical variables}
+#Transforming data on ammonium concentration, nitrate concentration, spawn surface area, and percentage of spawn dead into a numerical format
+  pond_wide$nh4n_numeric<-as.numeric(as.character(pond_wide$NH4N))
+  pond_wide$no3n_numeric<-as.numeric(as.character(pond_wide$NO3N))
+  pond_wide$surfarea_numeric<-as.numeric(as.character(pond_wide$SURFAREA))
+  pond_wide$percdead_numeric<-as.numeric(as.character(pond_wide$PERCDEAD))
+```
+
+## Write Out 
+```{r}
+write.csv(pond_wide,'Pond Wide Assembled Data.csv')
+write.csv(land_cover_wide,'Land Cover Wide Assembled Data.csv')
+write.csv(spawn_climate,'Spawn Climate Assembled Data.csv')
+write.csv(winter_climate,'Winter Climate Assembled Data.csv')
+write.csv(tadpole_climate,'Tadpole Climate Assembled Data.csv')
+
+```
