@@ -1,0 +1,946 @@
+---
+title: "Frog Phenology Statisics V3 Mar24"
+author: "Xav Harrison"
+date: "2024-02-20"
+output:
+    html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Libraries and Data 
+
+##Libraries
+```{r}
+  library(brms)
+  library(factoextra)
+  library(FactoMineR)
+  library(corrplot)
+  library(tidyverse)
+  library(cowplot)
+  library(naniar)
+  library(rstatix)
+  library(RColorBrewer)
+  library(ggeffects)
+
+  plotopts<-theme_bw() +theme(axis.text=element_text(size=12),axis.title = element_text(size=15),legend.text = element_text(size=15),legend.title = element_text(size=15),strip.text.x = element_text(size=16))
+
+```
+
+## Data
+```{r}
+
+#Pond Data
+  pond_wide<-read.csv('Pond Wide Assembled Data.csv',header=T)
+    dim(pond_wide)
+#Land Cover Data
+  land_cover_wide<-read.csv('Land Cover Wide Assembled Data.csv',header=T,row.names = 1)
+#Spawn Climate  
+  spawn_climate<-read.csv('Spawn Climate Assembled Data.csv',header=T,row.names = 1)  
+#Winter Climate  
+  winter_climate<-read.csv('Winter Climate Assembled Data.csv',header=T,row.names = 1)  
+#Tadpole Climate  
+  tadpole_climate<-read.csv('Tadpole Climate Assembled Data.csv',header=T,row.names = 1)  
+  
+  
+## Year Coverage 
+  pond_wide %>% group_by(SITECODE) %>% reframe(min=min(survey_year),max=max(survey_year))
+```
+
+
+## Housekeeping
+```{r}
+
+#Variable Labels
+  label_df<-data.frame(old=c("year","arable_area","grassland_area","tmax","urban_area","spawn_no3n","forest_area","tmin","af","freshwater_area","other_area","spawn_nh4n","rain"),new=c("Year","Arable Area","Grassland Area","Maximum Temperature","Urban Area","Spawn Nitrate","Forest Area","Minimum Temperature","Air Frost","Freshwater Area","Other Area","Spawn Ammonium","Rain"))
+
+```
+
+# Dataset Assembly 
+
+## SPAWNDATE data frame (Winter Climate)
+```{r creating a table with data on spawndate}
+#Creating a data frame containing the earliest spawning date, the highest ammonium concentration breeding adults were exposed to???, and the highest nitrate concentration breeding adults were exposed to??? in each ECN location, pond, and year 
+  pond_wide %>% group_by(SITECODE,LCODE,survey_year) %>% summarize(spawn=mean(spawn_yearday,na.rm=TRUE),
+                                                                                                                    prespawn_nh4n=mean(nh4n_numeric[survey_yearday<min(spawn_yearday,na.rm=TRUE)], na.rm=TRUE),
+                                                                                                                 prespawn_no3n=mean(no3n_numeric[survey_yearday<min(spawn_yearday,na.rm=TRUE)], na.rm=TRUE)
+                                                                   ) -> spawndate_df
+                                                                  
+  colnames(spawndate_df)[colnames(spawndate_df) == "survey_year"] <- "year"
+  colnames(spawndate_df)[colnames(spawndate_df) == "SITECODE"] <- "location"
+
+#Adding land cover data  
+  spawndate_df = merge(x=spawndate_df,y=land_cover_wide,by=c("year", "location"),all.x=TRUE)
+  
+#Adding winter climate data   
+  spawndate_df = merge(x=spawndate_df,y=winter_climate,by=c("year", "location"),all.x=TRUE)
+  
+#Replacing infinity values with NA  
+  spawndate_df %>% replace_with_na_all(condition = ~.x == -Inf)-> spawndate_df
+  spawndate_df %>% replace_with_na_all(condition = ~.x == Inf)-> spawndate_df
+  
+
+```
+
+## HATCHDATE data frame (Spawn Climate)
+```{r creating a table with data on hatchdate}
+#Creating a data frame containing the earliest hatching date, the highest ammonium concentration spawn were exposed to???, and the highest nitrate concentration spawn were exposed to??? in each ECN location, pond, and year
+  pond_wide %>% group_by(SITECODE,LCODE,survey_year) %>% summarize(hatch=mean(hatch_yearday,na.rm=TRUE),
+                                                                                                                spawn_nh4n=mean(nh4n_numeric[survey_yearday<min(hatch_yearday,na.rm=TRUE) & survey_yearday>min(spawn_yearday,na.rm=TRUE)], na.rm=TRUE),
+                                                                                                                 spawn_no3n=mean(no3n_numeric[survey_yearday<min(hatch_yearday,na.rm=TRUE) & survey_yearday>min(spawn_yearday,na.rm=TRUE)], na.rm=TRUE)
+                                                                  )-> hatchdate_df
+
+  colnames(hatchdate_df)[colnames(hatchdate_df) == "survey_year"] <- "year"
+  colnames(hatchdate_df)[colnames(hatchdate_df) == "SITECODE"] <- "location"
+  
+#Adding land cover data   
+  hatchdate_df = merge(x=hatchdate_df,y=land_cover_wide,by=c("year", "location"),all.x=TRUE)
+  
+#Adding data on the climate spawn were exposed to  
+  hatchdate_df = merge(x=hatchdate_df,y=spawn_climate,by=c("year", "location"),all.x=TRUE)
+  
+#Replacing infinity values with NA  
+  hatchdate_df %>% replace_with_na_all(condition = ~.x == -Inf)-> hatchdate_df
+  hatchdate_df %>% replace_with_na_all(condition = ~.x == Inf)-> hatchdate_df
+  
+
+```
+
+## PERCDEAD data frame
+```{r creating a table with data on percdead}
+#Creating a data frame containing the highest percentage of spawn found dead, the highest ammonium concentration spawn were exposed to???, and the highest nitrate concentration spawn were exposed to??? in each ECN location, pond, and year
+  pond_wide %>% group_by(SITECODE,LCODE,survey_year) %>% dplyr::summarize(percdead=mean(percdead_numeric, na.rm=TRUE),
+                                                                                                                     spawn_nh4n=mean(nh4n_numeric[survey_yearday<min(hatch_yearday,na.rm=TRUE) & survey_yearday>min(spawn_yearday,na.rm=TRUE)], na.rm=TRUE),
+                                                                                                                 spawn_no3n=mean(no3n_numeric[survey_yearday<min(hatch_yearday,na.rm=TRUE) & survey_yearday>min(spawn_yearday,na.rm=TRUE)], na.rm=TRUE)
+                                                                   )-> percdead_df
+  
+  colnames(percdead_df)[colnames(percdead_df) == "survey_year"] <- "year"
+  colnames(percdead_df)[colnames(percdead_df) == "SITECODE"] <- "location"
+
+#Adding land cover data
+  percdead_df = merge(x=percdead_df,y=land_cover_wide,by=c("year", "location"),all.x=TRUE)
+
+#Adding data on the climate spawn were exposed to - should I do winter climate instead/as well, a measure of adult fitness?
+  percdead_df = merge(x=percdead_df,y=spawn_climate,by=c("year", "location"),all.x=TRUE)
+
+#Replacing infinity values with NA
+  percdead_df %>% replace_with_na_all(condition = ~.x == -Inf)-> percdead_df
+  percdead_df %>% replace_with_na_all(condition = ~.x == Inf)-> percdead_df
+
+  head(percdead_df)
+  nrow(percdead_df)
+  # 
+ ggplot(percdead_df, aes(y=percdead, x=year)) + geom_point(shape=21,size=5,aes(fill=factor(LCODE)))
+ggplot(percdead_df, aes(y=percdead, x=spawn_no3n)) + geom_point(shape=21,size=5,aes(fill=factor(LCODE)))
+
+  #  percdead_year
+```
+
+
+# Sample Sizes and Filtering 
+
+```{r}
+
+#HATCH
+  hatchdate_df %>% group_by(location) %>%reframe(hatch=length(hatch[which(!is.na(hatch))]))
+  hatchdate_df<-filter(hatchdate_df,location %in% c("T01","T02","T03","T04","T05","T06","T11") & hatch>0)
+  nrow(hatchdate_df)
+  table(hatchdate_df$location)
+  hatchdate_df$location<-factor(hatchdate_df$location)
+
+#SPAWN  
+  spawndate_df %>% group_by(location) %>%reframe(spawn=length(spawn[which(!is.na(spawn))]))
+  spawndate_df<-filter(spawndate_df,location %in% c("T01","T02","T03","T04","T05","T06","T11") & spawn>0)     
+  nrow(spawndate_df)
+  spawndate_df$location<-factor(spawndate_df$location)
+
+#PERCDEAD
+  percdead_df %>% group_by(location) %>%reframe(percdead=length(percdead[which(!is.na(percdead))]))
+  percdead_df<-filter(percdead_df,location %in% c("T01","T02","T03","T04","T05","T06","T11") & percdead>=0) 
+  nrow(percdead_df)
+  table(percdead_df$location)
+  percdead_df$location<-factor(percdead_df$location)
+  
+
+```
+
+# PCA and MODELS
+
+## SPAWNDATE 
+
+### Mean Trend Over Time
+
+```{r}
+#Sample Size
+ spawndate_df %>% filter(!is.na(spawn)) %>% nrow()
+
+spawnmeans<- spawndate_df %>% group_by(year,location) %>% reframe(spawn=mean(spawn,na.rm=T))
+
+spawn_siteplot1<-ggplot(spawnmeans,aes(x=year,y=spawn))+ geom_smooth(method="lm") + geom_point(shape=21,size=5,aes(fill=location)) + facet_wrap(.~location,nrow=4) + guides(fill="none")  + labs(x="Year",y="Spawn Date (Days 1st Jan)") + plotopts  + theme(axis.text.x = element_text(angle=45,hjust=1)) + scale_fill_brewer(palette = "Set2") 
+spawn_siteplot1
+
+# Correlations
+  spawndate_df %>% group_by(location) %>% cor_test(spawn,year,method="pearson") %>% mutate(p.adj=p.adjust(p,method="BH"))
+  
+#LMS
+  #Models
+   spawn_mods<-spawndate_df %>% group_by(location) %>% do(tidy(lm(spawn~year,data=.))) %>% filter(term=="year") #%>% mutate(p=p.value) %>% mutate(p.adj=p.adjust(p,method="BH"))
+  spawn_mods$p.adj<-p.adjust(p=spawn_mods$p.value,"BH")
+  
+#Annotations  
+  ann_text <- data.frame(year = 2005,spawn = 100,lab = "cor = -0.7 \np.adj = 0.01",
+                       location = "T01")
+spawn_siteplot2<-spawn_siteplot1 + geom_text(data = ann_text,label = ann_text$lab,size=6)
+  spawn_siteplot2
+
+#Models
+  spawn_site_model1<-glm(spawn ~ location*year,data=spawndate_df)
+  summary(spawn_site_model1)
+  plot(ggeffects::ggeffect(spawn_site_model1,term= ~year*location)) 
+  confint(spawn_site_model1)
+```
+
+### Mean Trend with AF Days
+
+```{r}
+
+spawn_af_plot1<-ggplot(spawndate_df,aes(x=af,y=spawn))+ geom_smooth(method="lm") + geom_point(shape=21,size=5,aes(fill=location)) + facet_wrap(.~location,nrow=4) + guides(fill="none")  + labs(x="Air Frost Days",y="Spawn Date (Days 1st Jan)") + plotopts  + theme(axis.text.x = element_text(angle=45,hjust=1)) + scale_fill_brewer(palette = "Set2") 
+spawn_af_plot1
+
+# Correlations
+  spawndate_df %>% group_by(location) %>% cor_test(spawn,af,method="pearson") %>% mutate(p.adj=p.adjust(p,method="BH"))
+
+```
+
+### Mean Trend with Temperature
+
+```{r}
+
+spawn_tmax_plot1<-ggplot(spawndate_df)+ geom_smooth(method="lm",aes(x=tmax,y=spawn,group=location)) + geom_point(shape=21,size=5,aes(fill=location,x=tmax,y=spawn)) + guides(fill="none")  + labs(x="Mean Winter Temperature",y="Spawn Date (Days 1st Jan)") + plotopts  + theme(axis.text.x = element_text(angle=45,hjust=1)) + scale_fill_brewer(palette = "Set2") 
+spawn_tmax_plot1
+
+# Correlations
+  spawndate_df %>% group_by(location) %>% cor_test(spawn,tmax,method="pearson") %>% mutate(p.adj=p.adjust(p,method="BH"))
+
+```
+
+
+### PCA
+```{r pca analysis for spawndate}
+#Removing sun
+  spawndate_nosun <- spawndate_df %>% dplyr::select(-sun)
+
+#Removing all rows containing NA values
+  spawndate_nona <- na.omit(spawndate_nosun)
+
+#Removing response variable
+  spawndate_noresp <- spawndate_nona %>% dplyr::select(-spawn)
+  
+#Removing location variables
+  spawndate_for_pca <- spawndate_noresp %>% dplyr::select(-location)
+  spawndate_for_pca <- spawndate_for_pca %>% dplyr::select(-LCODE)
+  
+  head(spawndate_for_pca) 
+  
+#Variable Rename
+    spawndatepcalabs<-label_df$new[match(colnames(spawndate_for_pca),label_df$old)]
+    spawndatepcalabs[c(2,3)]<-c("Pre-Spawn Ammonium","Pre-Spawn Nitrate")
+    colnames(spawndate_for_pca)<-spawndatepcalabs
+  
+#Performing Principal Components Analysis  
+  spawndate_res_pca <- PCA(spawndate_for_pca, graph = FALSE)
+  
+#Contributions
+  dimdesc(spawndate_res_pca, axes = 1:2)
+  
+#Producing a rotation plot
+  spawndate_rotationplot<-fviz_pca_var(spawndate_res_pca, col.var="black",
+   repel = TRUE) +
+    labs(x = "PC1", y = "PC2", title = "") + guides(color="none")
+```
+
+### Spawndate Data
+```{r glm analysis for spawndate}
+
+#Creating a data frame containing the co-ordinates of PC1 and PC2
+  spawndate_res_pca$ind$coord
+  spawndate_pca_data <- spawndate_res_pca$ind$coord[,c(1,2)]
+
+#Creating a data frame containing the earliest spawn date per ECN location, pond, and year, and the co-ordinates of PC1 and PC2
+  spawndate_glm_data <- cbind(spawndate_pca_data,spawndate_nona)
+  spawndate_glm_data <- as.data.frame(spawndate_glm_data)
+  count(spawndate_glm_data) #23 data points
+  
+##  Standardise
+  spawndate_glm_data$z_year<-as.numeric(scale(spawndate_glm_data$year))
+    spawndate_glm_data$z_tmax<-as.numeric(scale(spawndate_glm_data$tmax))
+```
+
+## Correlations 
+```{r}
+###Model   
+  spawndate_glm_data %>% cor_test(.,spawn,Dim.1,method="spearman")
+  spawndate_glm_data %>% cor_test(.,spawn,Dim.2,method="spearman")
+
+```
+
+
+## Multivariate Model  
+```{r}
+
+#POND ID
+  with(spawndate_df,table(location,LCODE))
+  spawndate_df$pond_id<-paste(spawndate_df$location,spawndate_df$LCODE,sep="_")
+  spawndate_df_subset<-subset(spawndate_df,!is.nan(spawn) & !is.nan(tmax) & !is.na(tmax))
+  nrow(spawndate_df_subset) #172
+  table(spawndate_df_subset$location)
+
+#library(brms)
+
+        bf_spawn<-bf(spawn ~ year + ar(p=1) + (1|p|pond_id)) + gaussian()
+        bf_spawn_temp<-bf(tmax ~ year + ar(p=1) + (1|p|pond_id)) + gaussian()
+        #bf_temp_min<-bf(tmin ~ year + (1|p|location)) + gaussian()
+
+###TMAX + TMIN       
+  fit_spawn1 <- brm(
+  bf_spawn + bf_spawn_temp  + set_rescor(TRUE),
+  data = spawndate_df, chains = 4, cores = 4,
+  control = list(adapt_delta = 0.99)
+)
+    
+  summary(fit_spawn1)
+  
+  #Check 
+   pp_check(fit_spawn1,resp='spawn')
+    pp_check(fit_spawn1,resp='tmax')
+
+
+ 
+```
+
+### Multivariate Predictions
+```{r}
+
+fit_spawn1_resid<-resid(fit_spawn1)
+
+spawn_resid_plotdata<- data.frame(cbind(fit_spawn1_resid[,,'spawn'][,c(1,3,4)],fit_spawn1_resid[,,'tmax'][,c(1,3,4)]))
+colnames(spawn_resid_plotdata)<-c("spawn","spawn2","spawn97","Temp","Temp2","Temp97")
+spawn_resid_plotdata$pond_id<-spawndate_df_subset$pond_id
+spawn_resid_plotdata$location<-substr(spawn_resid_plotdata$pond_id,1,3)
+
+spawn_plot1<-ggplot(spawn_resid_plotdata,aes(x=Temp,y=spawn))+ theme_bw() + geom_smooth(method="lm")
+spawn_plot2<- spawn_plot1 + geom_errorbar(aes(ymin=spawn2,ymax=spawn97,width=0.15),color="gray77") + geom_errorbar(aes(xmin=Temp2,xmax=Temp97,width=2),color="gray77") + geom_point(data=spawn_resid_plotdata,shape=21,size=5,aes(fill=location),color="white") + labs(x="Mean Winter Maximum Temperature Residual",y="Spawn Date Residual",fill="Pond ID") + plotopts  + theme(legend.position = "top") + scale_fill_brewer(palette = "Set2") + annotate("text",label="cor = -0.1 [-0.26,0.05]",x=-2,y=55,size=5)
+spawn_plot2
+
+#Mean Shift in Spawn (Days) per 1 deg rise
+  ggeffects::ggpredict(glm(spawn~Temp,data=spawn_resid_plotdata),terms=list(Temp=1))
+
+
+```
+
+### Site Level Posterior Plot 
+
+```{r}
+
+spawn_fit1_site<-ranef(fit_spawn1)$pond_id
+
+spawn_site_plotdata<- data.frame(cbind(spawn_fit1_site[,,'spawn_Intercept'][,c(1,3,4)],spawn_fit1_site[,,'tmax_Intercept'][,c(1,3,4)]))
+colnames(spawn_site_plotdata)<-c("spawn","spawn2","spawn97","Temp","Temp2","Temp97")
+spawn_site_plotdata$location<-substr(rownames(spawn_site_plotdata),1,3)
+
+spawn_site_plot1<-ggplot(spawn_site_plotdata,aes(x=Temp,y=spawn))+ theme_bw() + geom_smooth(method="lm")  
+spawn_site_plot2<- spawn_site_plot1 + geom_errorbar(aes(ymin=spawn2,ymax=spawn97,width=0.15),color="gray55") + geom_errorbar(aes(xmin=Temp2,xmax=Temp97,width=5),color="gray55") + geom_point(data=spawn_site_plotdata,shape=21,size=5,aes(fill=location),color="white") + labs(x="Mean Maximum Temperature Residual",y="Spawn Date Residual") + plotopts + scale_fill_manual(values=brewer.pal(8,"Set2")[c(1:6,8)]) + annotate("text",label="cor = -0.55 [-0.83,-0.13]",x=-1.5,y=-50,size=6) + theme(legend.position = "top") + labs(fill="")
+spawn_site_plot2
+
+```
+
+##  Graphs
+
+### Tests
+
+```{r}
+
+spawndate_long<- spawndate_df %>% dplyr::select(spawn,forest_area,arable_area,grassland_area,freshwater_area,urban_area,other_area,tmax,tmin,af,rain) %>% pivot_longer(.,cols=c(forest_area,arable_area,grassland_area,freshwater_area,urban_area,other_area,tmax,tmin,af,rain),names_to="variable",values_to="traitval")
+
+  spawndate_corr<-spawndate_long %>% group_by(variable) %>% cor_test(traitval,spawn,method="spearman")
+  spawndate_corr<-mutate(spawndate_corr,p.adj=p.adjust(p,"BH"))
+  spawndate_corr$Variable<-label_df$new[match(spawndate_corr$variable,label_df$old)]
+  spawndate_corr%>% dplyr::select(Variable,cor,statistic,p,p.adj) %>% arrange(p.adj)
+
+```
+
+### Graphs
+```{r}
+
+#Arable area
+  spawndate_plot1 <- ggplot(spawndate_df, aes(arable_area/1000000, spawn)) +
+    xlab(bquote("Arable area" (km^2))) + ylab("Spawn Date \n(Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Pond ID") + scale_fill_brewer(palette = "Set2") + plotopts+ theme(legend.position = "top") + annotate("text",label="cor = -0.65 ***" ,x=7.5,y=100,size=7)
+  spawndate_plot1
+  
+#Grassland
+  spawndate_plot2 <- ggplot(spawndate_df, aes(grassland_area/1000000, spawn)) +
+    xlab(bquote("Grassland area" (km^2))) +
+    ylab("Spawn Date \n(Days 1st Jan)")  +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Pond ID") + scale_fill_brewer(palette = "Set2")+ plotopts+ theme(legend.position = "top") + annotate("text",label="cor = 0.74 ***" ,x=8.5,y=100,size=7)
+  spawndate_plot2 
+  
+#Max Temp 
+  spawndate_plot3 <- ggplot(spawndate_df, aes(tmax, spawn)) +
+    xlab("Mean Maximum Winter Temperature (\u00B0C)") +  ylab("Spawn Date \n(Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Pond ID") + scale_fill_brewer(palette = "Set2") + plotopts + theme(legend.position = "top") + annotate("text",label="cor = -0.61 ***" ,x=5,y=25,size=7)
+  spawndate_plot3
+  
+#Air Frost 
+  spawndate_plot4 <- ggplot(spawndate_df, aes(af, spawn)) +
+    xlab("Air Frost Days") +  ylab("Spawn Date \n(Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Pond ID") + scale_fill_brewer(palette = "Set2") + plotopts + theme(legend.position = "top") + annotate("text",label="cor = 0.53 ***" ,x=17.5,y=25,size=7)
+  spawndate_plot4
+  
+#Max Temp Versin 2
+  spawndate_plot3_v2 <- ggplot(spawndate_df, aes(tmax, spawn,group=location)) +
+    xlab("Mean Maximum Winter Temperature (\u00B0C)") +  ylab("Spawn Date \n(Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Pond ID") + scale_fill_brewer(palette = "Set2") + plotopts + theme(legend.position = "top") + annotate("text",label="cor = -0.61 ***" ,x=5,y=25,size=7)
+  spawndate_plot3_v2
+  
+#Air Frost Version 2
+  spawndate_plot4 <- ggplot(spawndate_df, aes(af, spawn)) +
+    xlab("Air Frost Days") +  ylab("Spawn Date \n(Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Pond ID") + scale_fill_brewer(palette = "Set2") + plotopts + theme(legend.position = "top") + annotate("text",label="cor = 0.53 ***" ,x=17.5,y=25,size=7)
+  spawndate_plot4
+    
+  
+  
+```
+
+
+## Combined Plot
+
+### Spawn All Data
+```{r}
+# spawn_multivariateplot<-plot_grid(spawn_siteplot2,spawn_plot2,nrow=1,labels="AUTO",label_size=25)
+# ggsave2('Spawn Multivariate Plot.pdf',spawn_multivariateplot,width=35,height=20,units="cm")
+```
+
+### Individual Predictors
+```{r}
+
+#Save PCA Plot
+  ggsave2('Spawn PCA PLot.pdf',spawndate_rotationplot,width=10,height=10,units="cm")
+
+#Individual Predictors
+  spawndate_combinedplot<-plot_grid(spawndate_plot1,spawndate_plot2,spawndate_plot3,spawndate_plot4,labels=c("C","D","E","F"),nrow=2,label_size = 25)
+
+#Stich On Site Specific Temp Trends
+  spawndate_combinedplot2<-plot_grid(spawn_siteplot2,spawn_site_plot2,ncol=2,labels = c("A","B"),label_size = 25)
+
+#Stich On Bayesian Model   
+  spawndate_combinedplot3<-plot_grid(spawndate_combinedplot2,spawndate_combinedplot,nrow=2,rel_heights = c(1.5,2))
+#Save
+  ggsave2('Fig_2_Spawn Grid Plot.pdf',spawndate_combinedplot3,width=30,height=45,units="cm")
+```
+
+
+
+## HATCHDATE 
+
+### Mean Trend Over Time
+
+```{r}
+
+# Correlations
+  hatchdate_df %>% group_by(location) %>% cor_test(hatch,year,method="pearson") %>% mutate(p.adj=p.adjust(p,method="BH"))
+  
+#Models
+   hatch_mods<-hatchdate_df %>% group_by(location) %>% do(tidy(lm(hatch~year,data=.))) %>% filter(term=="year")
+   hatch_mods$p.adj<-p.adjust(p=hatch_mods$p.value,"BH")
+  hatch_mods
+   # 
+    
+#Sample Size
+ hatchdate_df %>% filter(!is.na(hatch)) %>% nrow()
+
+hatchmeans<- hatchdate_df %>% group_by(year,location) %>% reframe(hatch=mean(hatch,na.rm=T))
+
+hatch_site_plot1<-ggplot(hatchdate_df,aes(x=year,y=hatch))+ geom_smooth(method="lm") + geom_point(shape=21,size=5,aes(fill=location)) + theme_bw() + facet_wrap(.~location) + labs(x="Year",y="Hatch Date (Days 1st Jan)") + plotopts  + theme(axis.text.x = element_text(angle=45,hjust=1)) + scale_fill_brewer(palette = "Set2") + guides(fill="none")
+hatch_site_plot1
+
+#Annotations  
+  hatch_ann_text <- data.frame(year = 2005,hatch = 60,lab = "cor = -0.4 \np.adj = 0.045",
+                       location = "T04")
+hatch_site_plot2<-hatch_site_plot1 + geom_text(data = hatch_ann_text,label = hatch_ann_text$lab,size=6)
+  hatch_site_plot2
+
+
+ 
+ 
+```
+
+### Mean Trend with Temperature
+
+```{r}
+
+hatch_tmax_plot1<-ggplot(hatchdate_df)+ geom_smooth(method="lm",aes(x=tmax,y=hatch,group=location)) + geom_point(shape=21,size=5,aes(fill=location,x=tmax,y=hatch)) + guides(fill="none")  + labs(x="Mean Spawning Temperature",y="Hatch Date (Days 1st Jan)") + plotopts  + theme(axis.text.x = element_text(angle=45,hjust=1)) + scale_fill_brewer(palette = "Set2") 
+hatch_tmax_plot1
+
+# Correlations
+  spawndate_df %>% group_by(location) %>% cor_test(spawn,tmax,method="pearson") %>% mutate(p.adj=p.adjust(p,method="BH"))
+
+```
+
+
+
+## PCA
+```{r pca hatchdate}
+#Removing sun
+  hatchdate_nosun <- hatchdate_df %>% dplyr::select(-sun)
+
+#Removing all rows containing NA values
+  hatchdate_nona <- na.omit(hatchdate_nosun)
+
+#Removing response variable
+  hatchdate_noresp <- hatchdate_nona %>% dplyr::select(-hatch)
+
+#Removing location variables
+  hatchdate_for_pca <- hatchdate_noresp %>% dplyr::select(-location)
+  hatchdate_for_pca <- hatchdate_for_pca %>% dplyr::select(-LCODE)
+  
+#Variable Rename
+    hatchdatepcalabs<-label_df$new[match(colnames(hatchdate_for_pca),label_df$old)]
+    #hatchdatepcalabs[c(2,3)]<-c("Pre-Spawn Ammonium","Pre-Spawn Nitrate")
+    colnames(hatchdate_for_pca)<-hatchdatepcalabs
+
+
+#Performing Principal Components Analysis     
+  hatchdate_res_pca <- PCA( hatchdate_for_pca, graph = FALSE)
+
+#Contributions
+  dimdesc(hatchdate_res_pca, axes = 1:2)
+  
+#Producing a rotation plot   
+  hatch_rotationplot<-fviz_pca_var(hatchdate_res_pca, col.var = "black",
+                     repel = TRUE
+  
+                     ) +
+    labs(x = "PC1", y = "PC2", title = "") + guides(color="none")
+```
+
+
+### Data
+```{r glm analysis for hatchdate}
+#Creating a data frame containing the co-ordinates of PC1 and PC2
+  hatchdate_res_pca$ind$coord
+  hatchdate_pca_data <- hatchdate_res_pca$ind$coord[,c(1,2)]
+
+#Creating a data frame containing the earliest hatch date per ECN location, pond, and year, and the co-ordinates of PC1 and PC2
+  hatchdate_glm_data <- cbind(hatchdate_pca_data,hatchdate_nona)
+  colnames(hatchdate_glm_data) [6]<- c("hatchdate")
+  hatchdate_glm_data <- as.data.frame(hatchdate_glm_data)
+  count(hatchdate_glm_data) #25 data points
+  table(hatchdate_glm_data$location)
+
+  nrow(hatchdate_glm_data)
+
+
+```
+
+## Correlations
+```{r}
+###Model   
+  hatchdate_glm_data %>% cor_test(.,hatchdate,Dim.1,method="spearman")
+  hatchdate_glm_data %>% cor_test(.,hatchdate,Dim.2,method="spearman")
+  
+```
+
+## Multivariate Model  
+```{r}
+
+#POND ID
+  with(hatchdate_df,table(location,LCODE))
+  hatchdate_df$pond_id<-paste(hatchdate_df$location,hatchdate_df$LCODE,sep="_")
+  hatchdate_df_subset<-subset(hatchdate_df,!is.nan(hatch) & !is.nan(tmax) & !is.na(tmax))
+  nrow(hatchdate_df_subset) #143
+
+#library(brms)
+
+        bf_hatch<-bf(hatch ~ year + ar(p=1) + (1|p|pond_id)) + gaussian()
+        bf_hatch_temp<-bf(tmax ~ year + ar(p=1) + (1|p|pond_id)) + gaussian()
+        #bf_temp_min<-bf(tmin ~ year + (1|p|location)) + gaussian()
+
+###TMAX + TMIN       
+  fit_hatch1 <- brm(
+  bf_hatch + bf_hatch_temp  + set_rescor(TRUE),
+  data = hatchdate_df_subset, chains = 4, cores = 4,
+  control = list(adapt_delta = 0.99)
+)
+    
+  summary(fit_hatch1)
+  bayes_R2(fit_hatch1)
+  
+  #Check 
+  # pp_check(fit_spawn1,resp='highestpercdeadlogit')
+  #  pp_check(fit_spawn1,resp='tmax')
+
+
+ 
+```
+
+### Multivariate Predictions
+```{r}
+
+fit_hatch1_resid<-resid(fit_hatch1)
+
+hatch_resid_plotdata<- data.frame(cbind(fit_hatch1_resid[,,'hatch'][,c(1,3,4)],fit_hatch1_resid[,,'tmax'][,c(1,3,4)]))
+colnames(hatch_resid_plotdata)<-c("hatch","hatch2","hatch97","Temp","Temp2","Temp97")
+hatch_resid_plotdata$pond_id<-hatchdate_df_subset$pond_id
+hatch_resid_plotdata$location<-hatchdate_df_subset$location
+
+hatch_plot1<-ggplot(hatch_resid_plotdata,aes(x=Temp,y=hatch))+ theme_bw() + geom_smooth(method="lm")  
+hatch_plot2<- hatch_plot1 + geom_errorbar(aes(ymin=hatch2,ymax=hatch97,width=0.15),color="gray77") + geom_errorbar(aes(xmin=Temp2,xmax=Temp97,width=2),color="gray77") + geom_point(data=hatch_resid_plotdata,shape=21,size=5,aes(fill=location),color="white") + labs(x="Mean Maximum Spawning \nTemperature Residual",y="Hatch Date Residual",fill="Location") + plotopts + theme(legend.position = "top") + scale_fill_brewer(palette="Set2") + annotate("text",x=-1.8,y=-25,label="cor = -0.37 \n[-0.52, -0.22]",size=6)
+hatch_plot2
+
+#Shift in Hatching (Days) Per 1 deg rise in temperature
+  ggeffects::ggpredict(glm(hatch~Temp,data=hatch_resid_plotdata),terms=list(Temp=1))
+
+
+```
+
+##  Graphs
+
+### Tests
+
+```{r}
+
+hatchdate_long<- hatchdate_df %>% dplyr::select(hatch,forest_area,arable_area,grassland_area,freshwater_area,urban_area,other_area,tmax,tmin,af,rain) %>% pivot_longer(.,cols=c(forest_area,arable_area,grassland_area,freshwater_area,urban_area,other_area,tmax,tmin,af,rain),names_to="variable",values_to="traitval")
+
+  hatchdate_corr<-hatchdate_long %>% group_by(variable) %>% cor_test(traitval,hatch,method="spearman")
+  hatchdate_corr<-mutate(hatchdate_corr,p.adj=p.adjust(p,"BH"))
+  hatchdate_corr$Variable<-label_df$new[match(hatchdate_corr$variable,label_df$old)]
+  hatchdate_corr%>% dplyr::select(Variable,cor,statistic,p,p.adj) %>% arrange(p.adj)
+
+```
+
+### Graphs
+```{r }
+
+#Arable area
+  hatchdate_plot1 <- ggplot(hatchdate_df, aes(arable_area/1000000, hatch)) +
+    xlab(bquote("Arable area" (km^2))) + ylab("Hatch Date (Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Location") + scale_fill_brewer(palette = "Set2") + plotopts+ theme(legend.position = "top") + annotate("text",label="cor = -0.68 ***" ,x=7.5,y=125,size=7)
+  hatchdate_plot1
+  
+#T MAX
+  hatchdate_plot2 <- ggplot(hatchdate_df, aes(tmax, hatch)) +
+    xlab("Mean Maximum Spawning Temperature") +
+    ylab("Hatch Date (Days 1st Jan)")  +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Location") + scale_fill_brewer(palette = "Set2")+ plotopts+ theme(legend.position = "top") + annotate("text",label="cor = -0.51 ***" ,x=8,y=50,size=7)
+  hatchdate_plot2 
+  
+#Grassland area
+  hatchdate_plot3 <- ggplot(hatchdate_df, aes(grassland_area/1000000, hatch)) +
+    xlab(bquote("Grassland area" (km^2))) +  ylab("Hatch Date (Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Location") + scale_fill_brewer(palette = "Set2") + plotopts + theme(legend.position = "top") + annotate("text",label="cor = 0.74 ***" ,x=9,y=120,size=7)
+  hatchdate_plot3
+  
+#Air Frost  
+    hatchdate_plot4 <- ggplot(hatchdate_df, aes(af, hatch)) +
+    xlab("Air Frost Days per Month") +
+    ylab("Hatch date (Days 1st Jan)")  +
+  geom_smooth(method = "lm",formula=y~poly(x,3)) + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15)  + scale_fill_brewer(palette = "Set2") + plotopts + theme(legend.position = "top") + annotate("text",label="cor = 0.54 ***" ,x=10,y=50,size=7)
+  hatchdate_plot4
+  
+  #Urban area
+  hatchdate_plot5 <- ggplot(hatchdate_df, aes(urban_area/1000000, hatch)) +
+    xlab(bquote("Urban area" (km^2))) +  ylab("Hatch Date (Days 1st Jan)") +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location),color="white") +
+    theme_bw(base_size = 15) + labs(fill="Location") + scale_fill_brewer(palette = "Set2") + plotopts + theme(legend.position = "top") 
+  hatchdate_plot5
+```
+
+### Individual Predictors
+```{r}
+
+#Save PCA Plot
+  ggsave2('Hatch PCA PLot.pdf',hatch_rotationplot,width=10,height=10,units="cm")
+
+#Individual Predictors
+  hatch_combinedplot<-plot_grid(hatchdate_plot1,hatchdate_plot3,hatchdate_plot2,hatchdate_plot4,labels=c("C","D","E","F"),nrow=2,label_size = 25)
+
+#Stich On Site Specific Temp Trends
+  hatchdate_combinedplot2<-plot_grid(hatch_site_plot2,hatch_plot2,ncol=2,labels = c("A","B"),label_size = 25)
+
+#Stich On Bayesian Model   
+  hatchdate_combinedplot3<-plot_grid(hatchdate_combinedplot2,hatch_combinedplot,nrow=2,rel_heights = c(1.5,2))
+#Save
+  ggsave2('Fig_3_Hatch Grid Plot.pdf',hatchdate_combinedplot3,width=30,height=45,units="cm")
+```
+
+## PERCENT DEAD
+
+### Mean Trend Over Time
+
+```{r}
+percdead_df %>% group_by(year,location) %>% reframe(percdead=mean(percdead,na.rm=T)) 
+
+percdead_df %>% group_by(location) %>% reframe(min=min(year,na.rm=T),max=max(year,na.rm=T)) 
+hatchdate_df %>% group_by(location) %>% reframe(min=min(year,na.rm=T),max=max(year,na.rm=T)) 
+spawndate_df %>% group_by(location) %>% reframe(min=min(year,na.rm=T),max=max(year,na.rm=T)) 
+
+#Subset
+  percdead_df_subset<-subset(percdead_df,percdead>=0)
+
+#SampleSize 
+  percdead_df %>% filter(!is.nan(percdead)) %>% nrow()
+  
+# Correlations
+  percdead_df %>% filter(!is.nan(percdead)) %>% group_by(location) %>% cor_test(percdead,year,method="pearson") %>% mutate(p.adj=p.adjust(p,method="BH"))
+  
+  # percdead_df_subset %>% filter(!is.nan(percdead)) %>% group_by(pond_id) %>% cor_test(percdead,year,method="spearman") %>% mutate(p.adj=p.adjust(p,method="BH"))
+  
+   
+#Plot By Location 
+  percdeaad_siteplot1<-ggplot(percdead_df,aes(x=year,y=percdead))+ geom_smooth(method="lm") + geom_point(shape=21,size=5,aes(fill=location)) + theme_bw() + facet_wrap(.~location) + guides(fill="none") + plotopts + labs(x="Year",y="Percetage Spawn Dead") + theme(axis.text.x = element_text(angle=45,hjust=1)) + scale_fill_brewer(palette = "Set2")
+  percdeaad_siteplot1
+
+#Plot By Pond ID  
+  # percdeaad_siteplot2<-ggplot(percdead_df_subset,aes(x=year,y=percdead))+ geom_smooth(method="lm") + geom_point(shape=21,size=5,aes(fill=location)) + theme_bw() + facet_wrap(.~pond_id) + guides(fill="none") + plotopts + labs(x="Year",y="Percetage Spawn Dead") + theme(axis.text.x = element_text(angle=45,hjust=1)) + scale_fill_brewer(palette = "Set2")
+  # percdeaad_siteplot2
+  
+#Annotations  
+  ann_text_percdead <- data.frame(year = 2001,percdead = 75,lab = "cor = 0.54 \np.adj = 0.02",
+                       location = "T11")
+percdeaad_siteplot1_ann<-percdeaad_siteplot1 + geom_text(data = ann_text_percdead,label = ann_text_percdead$lab,size=5)
+  percdeaad_siteplot1_ann  
+
+
+
+
+```
+
+
+### Mean Trend with Temperature
+
+```{r}
+
+dead_tmax_plot1<-ggplot(percdead_df)+ geom_smooth(method="lm",aes(x=af,y=percdead,group=location)) + geom_point(shape=21,size=5,aes(fill=location,x=af,y=percdead)) + guides(fill="none")  + labs(x="Mean Spawning Temperature",y="Percent Dead Spawn") + plotopts + scale_fill_brewer(palette = "Set2") 
+dead_tmax_plot1
+
+# Correlations
+  spawndate_df %>% group_by(location) %>% cor_test(spawn,tmax,method="pearson") %>% mutate(p.adj=p.adjust(p,method="BH"))
+
+```
+
+## Multivariate model 
+```{r}
+#POND ID
+  #with(percdead_df,table(location,LCODE))
+  percdead_df$pond_id<-paste(percdead_df$location,percdead_df$LCODE,sep="_")
+  nrow(percdead_df_subset) #
+  
+  pdf_subtable<-table(percdead_df$pond_id)
+  percdead_df_subset<-subset(percdead_df,pond_id %in% names(pdf_subtable)[pdf_subtable>9])
+  nrow(percdead_df_subset)
+  
+#Convert To Logits
+   library(arm)
+    percdead_df_subset$percdead[which(percdead_df_subset$percdead==100)]<-99.99999
+    percdead_df_subset$percdead[which(percdead_df_subset$percdead==0)]<-0.000001
+    percdead_df_subset$percdead_logit<-logit(percdead_df_subset$percdead/100)
+ 
+  
+## ALL DATA, TMAX
+        bf_dead<-bf(percdead_logit ~ year + ar(p=1)  +  (1|p|pond_id)) + gaussian()
+        #bf_dead_perc<-bf(percdead ~ year + ar(p=1)  +  (1|p|pond_id)) + gaussian()
+
+        #bf_af<-bf(af ~ 1 + ar(p=1) + (0+year|p|pond_id)) + gaussian()
+        #bf_temp_min<-bf(tmin ~ 1 +  ar(p=1) + (1|p|pond_id)) + gaussian()
+        bf_temp_max<-bf(tmax ~ year  +  ar(p=1) + (1|p|pond_id)) + gaussian()
+
+# ### TMIN       
+#   percedead_fit1 <- brm(
+#   bf_dead_perc  + bf_temp_max + set_rescor(TRUE),
+#   data = percdead_df_subset, chains = 4, cores = 4,
+#   control = list(adapt_delta = 0.99)
+# )
+#     
+#   summary(percedead_fit1)
+#   
+#   #Check 
+#    pp_check(percedead_fit1,resp='percdead')
+#   pp_check(percedead_fit1,resp='tmax')
+
+### TMAX       
+  percedead_fit2 <- brm(
+  bf_dead  + bf_temp_max + set_rescor(TRUE),
+  data = percdead_df_subset, chains = 4, cores = 4,
+  control = list(adapt_delta = 0.99)
+)
+    
+  summary(percedead_fit2)
+      
+
+```
+
+### Site Level Posterior Plot 
+
+```{r}
+
+percdead_fit2_site<-ranef(percedead_fit2)$pond_id
+
+percdead_site_plotdata<- data.frame(cbind(percdead_fit2_site[,,'percdeadlogit_Intercept'][,c(1,3,4)],percdead_fit2_site[,,'tmax_Intercept'][,c(1,3,4)]))
+colnames(percdead_site_plotdata)<-c("percdead","percdead2","percdead97","Temp","Temp2","Temp97")
+percdead_site_plotdata$location<-substr(rownames(percdead_site_plotdata),1,3)
+
+percdead_site_plot1<-ggplot(percdead_site_plotdata,aes(x=Temp,y=percdead))+ theme_bw() + geom_smooth(method="lm")  
+percdead_site_plot2<- percdead_site_plot1 + geom_errorbar(aes(ymin=percdead2,ymax=percdead97,width=0.15),color="gray55") + geom_errorbar(aes(xmin=Temp2,xmax=Temp97,width=0.5),color="gray55") + geom_point(data=percdead_site_plotdata,shape=21,size=5,aes(fill=location),color="white") + labs(x="Mean Maximum Temperature Residual",y="Percentage Dead Spawn Residual",fill="Location") + plotopts + scale_fill_brewer(palette="Set2") + annotate(geom="text",x=-1,y=-10,label="cor = -0.8 \n [-0.96,-0.45]",size=6)
+percdead_site_plot2
+
+```
+
+## PCA
+```{r pca percdead}
+#Removing sun
+  percdead_nosun <- percdead_df %>% dplyr::select(-sun)
+
+#Removing all rows containing NA values
+  percdead_nona <- na.omit(percdead_nosun)
+  nrow(percdead_nona)
+
+#Removing response variable
+  percdead_noresp <- percdead_nona %>% dplyr::select(-percdead)
+  
+#Removing location variables
+  percdead_for_pca <- percdead_noresp %>% dplyr::select(-location,-LCODE,-pond_id)
+  #percdead_for_pca <- percdead_for_pca %>% dplyr::select(-LCODE)
+  
+#head(percdead_for_pca)
+  
+#Rename Variables
+  percdeadpcalabs<-label_df$new[match(colnames(percdead_for_pca),label_df$old)]
+  colnames(percdead_for_pca)<-percdeadpcalabs
+
+
+#Performing Principal Components Analysis
+  percdead_res_pca <- PCA(percdead_for_pca, graph = FALSE)
+  
+#Contributions
+  dimdesc(percdead_res_pca, axes = 1:2)
+  
+#Producing a rotation plot
+  percdead_rotationplot<-fviz_pca_var(percdead_res_pca, col.var = "black",
+  
+                    
+  
+                     repel = TRUE
+  
+                     ) +
+    labs(x = "PC1", y = "PC2", title = "") + guides(colour="none") + plotopts
+```
+
+## Data Processing 
+```{r}
+
+#Creating a data frame containing the co-ordinates of PC1 and PC2
+  percdead_res_pca$ind$coord
+  percdead_pca_data <- percdead_res_pca$ind$coord[,c(1,2)]
+
+#Creating a data frame containing the highest percentage of spawn dead per ECN location, pond, and year, and the co-ordinates of PC1 and PC2
+  percdead_glm_data <- cbind(percdead_pca_data,percdead_nona)
+  #colnames(percdead_glm_data)[1:2] <- c("Dim.1", "Dim.2")
+  percdead_glm_data <- as.data.frame(percdead_glm_data)
+  count(percdead_glm_data) #33 data points
+```
+
+## Correlations
+```{r}
+
+###Model   
+  percdead_glm_data %>% cor_test(.,percdead,Dim.1,method="spearman")
+  percdead_glm_data %>% cor_test(.,percdead,Dim.2,method="spearman")
+```
+
+##  Graphs
+
+### Tests
+
+```{r}
+
+percdead_long<- percdead_glm_data %>% dplyr::select(percdead,spawn_nh4n,spawn_no3n,forest_area,arable_area,grassland_area,freshwater_area,urban_area,other_area,tmax,tmin,af,rain) %>% pivot_longer(.,cols=c(spawn_nh4n,spawn_no3n,forest_area,arable_area,grassland_area,freshwater_area,urban_area,other_area,tmax,tmin,af,rain),names_to="variable",values_to="traitval")
+
+  percdead_corr<-percdead_long %>% group_by(variable) %>% cor_test(traitval,percdead,method="spearman")
+  percdead_corr<-mutate(percdead_corr,p.adj=p.adjust(p,"BH"))
+  percdead_corr$Variable<-label_df$new[match(percdead_corr$variable,label_df$old)]
+  percdead_corr%>% dplyr::select(Variable,cor,statistic,p,p.adj) %>% dplyr::arrange(p.adj)
+
+```
+
+### Graphs
+```{r }
+
+  
+#Arable area
+  percentdead_plot2 <- ggplot(percdead_df, aes(arable_area/1000000, percdead)) +
+    xlab(bquote("Arable area " (km^2))) +
+    ylab("Percent Dead Spawn")  +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location)) +
+    theme_bw(base_size = 15) + labs(fill="Location") + scale_fill_brewer(palette = "Set2") + theme(legend.position = "top") + annotate(geom="text",x=7,y=75,label="cor = -0.53 \np.adj=0.02",size=6)
+  percentdead_plot2
+  
+#TMax
+  percentdead_plot3 <- ggplot(percdead_df, aes(tmax, percdead)) +
+    xlab("Mean Maximum Temperature") +
+    ylab("Percent Spawn \n Dead (Logits)")  +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location)) +
+    theme_bw(base_size = 15) + labs(fill="Location") + scale_fill_brewer(palette = "Set2") + theme(legend.position = "top") + annotate(geom="text",x=7,y=75,label="cor = -0.52 \np.adj=0.02",size=6)
+  percentdead_plot3 #+ facet_wrap(.~location)
+  
+#Grassland Area  
+    percentdead_plot4 <- ggplot(percdead_df, aes(grassland_area/1000000, percdead)) +
+    xlab(bquote("Grassland area " (km^2))) +
+    ylab("Percent Dead Spawn")  +
+  geom_smooth(method = "lm") + geom_point(shape=21,size=5,aes(fill=location)) +
+    theme_bw(base_size = 15) + labs(fill="Location") + scale_fill_brewer(palette = "Set2") + theme(legend.position = "top")+ annotate(geom="text",x=10,y=75,label="cor = 0.49 \np.adj=0.03",size=6)
+  percentdead_plot4
+  
+####### SAVE GRID  
+# percdead_grid1<-plot_grid(percdead_rotationplot,percentdead_plot2,ncol=2,labels="AUTO",label_size=25)
+# percdead_grid2<-plot_grid(percdead_grid1,percdead_site_plot2,nrow=2,labels=c("","C"),label_size = 25)
+# 
+# ggsave2('Fig_5_Percent Dead Combined Plot.pdf',percdead_grid2,width=25,height=25,units="cm")
+
+
+```
+
+### Individual Predictors
+```{r}
+
+#Save PCA Plot
+  ggsave2('Percent Dead PCA PLot.pdf',percdead_rotationplot,width=10,height=10,units="cm")
+
+#Individual Predictors
+  percdead_combinedplot<-plot_grid(percentdead_plot2,percentdead_plot3,percentdead_plot4,labels=c("C","D","E"),nrow=2,label_size = 25)
+
+#Stich On Site Specific Temp Trends
+  percdead_combinedplot2<-plot_grid(percdeaad_siteplot1_ann,percdead_site_plot2,ncol=2,labels = c("A","B"),label_size = 25)
+
+#Stich On Bayesian Model   
+  percdead_combinedplot3<-plot_grid(percdead_combinedplot2,percdead_combinedplot,nrow=2,rel_heights = c(1.5,2))
+#Save
+  ggsave2('Fig_4_PercentDead Grid Plot.pdf',percdead_combinedplot3,width=40,height=45,units="cm")
+```
